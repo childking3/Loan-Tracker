@@ -1,0 +1,11 @@
+/humhub-1.18.5/
+/protected/.env
+/protected/runtime/cache/*
+/protected/runtime/logs/*
+/protected/runtime/sessions/*
+!/protected/runtime/cache/.gitkeep
+!/protected/runtime/logs/.gitkeep
+!/protected/runtime/sessions/.gitkeep
+/protected/uploads/avatars/*
+!/protected/uploads/avatars/.gitkeep
+/PENTEST_REFERENCE.md

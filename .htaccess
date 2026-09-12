@@ -1,0 +1,87 @@
+# Security headers that do not depend on the per-request CSP nonce.
+#
+# app\components\Csp (protected/components/Csp.php) already sets these,
+# plus a nonce'd Content-Security-Policy, on every response Yii dispatches.
+# But static files under this DocumentRoot (currently just /static/css) are
+# served by Apache directly and never reach index.php, so a PHP-level
+# response hook cannot touch them. These directives cover that gap at the
+# web server level so every response from this host carries them, not only
+# the ones PHP handles.
+#
+# Content-Security-Policy is deliberately NOT duplicated here. CSP is
+# enforced by the browser against the navigated document, not against each
+# subresource fetch - a CSS file being served with or without a CSP header
+# has no bearing on what the browser allows, so adding a nonce-less policy
+# here would add complexity without adding any real protection, and risks
+# fighting with the nonce'd policy PHP sets on real pages. HumHub was
+# checked for a server-level equivalent to model this on (see CODEBASE.md's
+# "Borrowed from HumHub" section) and does not have one either - its
+# security headers are also PHP-only, applied to its dynamic app response.
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "same-origin"
+    Header always set Permissions-Policy "geolocation=(), camera=(), microphone=()"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+</IfModule>
+
+# Deny any dotfile at this DocumentRoot (.env, .htaccess itself, anything
+# like it that might ever land here). Not currently exploitable - .env
+# lives inside protected/, which the vhost already denies outright via
+# <Directory>...Require all denied</Directory> - but HumHub denies
+# dotfiles at its own doc root the same way (root .htaccess.dist's
+# RedirectMatch rule) as a second, independent layer, not relying solely
+# on directory placement. Adapted as a plain <FilesMatch> instead of
+# HumHub's RedirectMatch regex - simpler, and HumHub's carve-out for
+# /.well-known/ (ACME HTTP-01 challenges) doesn't apply here: this box
+# never terminates TLS itself, that happens at the reverse proxy in
+# front of it (see CODEBASE.md's "Public exposure discovered" note), so
+# this box is never asked to serve a challenge file.
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# CODEBASE.md, PENTEST_REFERENCE.md, PHASE9_REVIEW.md,
+# POLLING_COMPARISON.md - this project's own internal documentation -
+# have been sitting directly in this DocumentRoot the entire time
+# (never inside protected/, which is the only other directory this
+# vhost denies), and none of them are dotfiles, so neither existing
+# defense above ever covered them. Confirmed live during a security
+# recheck that all four were served with a plain 200 to an
+# unauthenticated request - including PENTEST_REFERENCE.md, which
+# names this deployment's own dev admin password in plain text. This
+# app has been genuinely public (not just localhost) for real spans of
+# this engagement, so this was a live credential leak, not a
+# theoretical one. Blocked by extension, matching the dotfile rule's
+# own "deny by pattern, not by remembering to list every current file"
+# approach - covers any future .md added here the same way, not just
+# today's four.
+<FilesMatch "\.md$">
+    Require all denied
+</FilesMatch>
+
+RewriteEngine on
+
+# humhub-1.18.5/ - the reference copy of HumHub kept in this same
+# checkout purely so its source can be read for comparison (see
+# CODEBASE.md's "Borrowed from HumHub" notes throughout this project) -
+# has its own index.php sitting inside this DocumentRoot, with nothing
+# above blocking it. Confirmed live during a security recheck: hitting
+# it directly runs HumHub's real bootstrap and returns "Error: The
+# assets directory is not writable by the PHP process" with a 200 - a
+# second, unconfigured, unrelated application was actually executing
+# PHP on this public host, not merely sitting there as inert files.
+# This one rule needed to come before the catch-all RewriteRule below:
+# that rule only skips paths matching an existing file or directory,
+# and every path under humhub-1.18.5/ is exactly that, so the app's own
+# router would never have caught this either. [F] responds 403; [L]
+# stops processing so this never falls through to the app's own
+# routing rule beneath it.
+RewriteRule ^humhub-1\.18\.5/ - [F,L]
+
+# if a directory or a file exists, use the request directly
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# otherwise forward it to index.php
+RewriteRule . index.php
