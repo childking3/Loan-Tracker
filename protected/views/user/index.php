@@ -1,11 +1,12 @@
 <?php
 
 /** @var \yii\web\View $this */
-/** @var \app\models\User[] $users */
+/** @var \yii\data\ActiveDataProvider $dataProvider */
 /** @var array $roles */
 
 use yii\helpers\Html;
 use yii\helpers\Url;
+use yii\widgets\LinkPager;
 
 $this->title = 'Staff accounts';
 ?>
@@ -29,7 +30,7 @@ $this->title = 'Staff accounts';
     </tr>
     </thead>
     <tbody>
-    <?php foreach ($users as $user): ?>
+    <?php foreach ($dataProvider->getModels() as $user): ?>
         <tr>
             <td>
                 <?php if ($user->avatar_filename): ?>
@@ -65,3 +66,5 @@ $this->title = 'Staff accounts';
     </tbody>
 </table>
 </div>
+
+<?= LinkPager::widget(['pagination' => $dataProvider->getPagination()]) ?>

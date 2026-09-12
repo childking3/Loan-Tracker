@@ -1,11 +1,12 @@
 <?php
 
 /** @var \yii\web\View $this */
-/** @var \app\models\Loan[] $loans */
+/** @var \yii\data\ActiveDataProvider $dataProvider */
 /** @var string $status */
 /** @var string $search */
 
 use yii\helpers\Html;
+use yii\widgets\LinkPager;
 
 $this->title = 'Loans';
 ?>
@@ -42,7 +43,7 @@ $this->title = 'Loans';
     </tr>
     </thead>
     <tbody>
-    <?php foreach ($loans as $loan): ?>
+    <?php foreach ($dataProvider->getModels() as $loan): ?>
         <tr>
             <td><?= Html::encode($loan->loan_number) ?></td>
             <td><?= Html::encode($loan->customer->full_name) ?></td>
@@ -55,3 +56,5 @@ $this->title = 'Loans';
     </tbody>
 </table>
 </div>
+
+<?= LinkPager::widget(['pagination' => $dataProvider->getPagination()]) ?>

@@ -5498,3 +5498,56 @@ changed report's HTML and CSV output, cross-checked against a direct
 `Customer::find()` listing to confirm row counts matched exactly
 (including that the one soft-deleted test customer correctly stayed
 excluded from both the report and its CSV, same as before this change).
+
+## Same pagination fix, but for the pages it missed - 2026-09-12, immediately after
+
+The reports pass above only touched `ReportController`. Asked directly
+"how do we solve pagination" right after - which, per the standing
+[[feedback_fix_pattern_everywhere]] instruction (this exact project has
+hit this twice before: a mobile-responsive `overflow-x` fix and a later
+table-scroll/pagination round both stopped at the views already open
+instead of grepping for every occurrence of the pattern), meant treating
+"unbounded whole-table listing feeding an HTML table" as the pattern to
+find everywhere, not just confirming the reports work. `grep -rl "<table"
+protected/views/` plus a check of every controller `->all()` call turned
+up three more real instances the first pass never touched:
+
+- **`LoanController::actionIndex()`** - the main loans list. Highest
+  priority of the three: this is the one table this session permanently
+  decided never deletes a row ("loan shouldnt ever be deleted"), so
+  unlike everything else in this app it has no ceiling at all, soft-delete
+  churn included. Also had its own separate, previously-unnoticed N+1:
+  no `with()` on `customer`/`assignedStaff` despite the index view reading
+  both per row - fixed alongside the pagination since both live on the
+  same query.
+- **`CustomerController::actionTrash()`** - soft-deleted customers, never
+  purged. Concretely demonstrated as a real accumulation risk earlier
+  this session, not a hypothetical: the pentest cleanup pass had to remove
+  2,000+ leftover customer/guarantor rows that had built up.
+- **`UserController::actionIndex()`** - the staff list itself, the
+  feature whose "we don't know how many staff would end up being there"
+  concern is what started the scalability conversation back in the
+  avatar-sharding decision. Bounded by headcount so lower urgency than
+  the other two, but leaving the very list that prompted the concern
+  unpaginated would have been the same kind of incomplete sweep the
+  standing feedback warns about.
+
+`CustomerController::actionView()`'s and `DashboardController::
+actionStaff()`'s per-entity loan-history tables, and
+`LoanPackageController`'s listing (five fixed packages, no create action,
+per its own class docblock), were deliberately left alone - each is
+bounded by one customer's or one staff member's own history, or fixed by
+design, not by total business volume, so they're a different pattern
+than the one being fixed here, not a missed instance of it.
+
+All three converted to the same `ActiveDataProvider` + `LinkPager`
+convention `CustomerController::actionIndex()` and `LogController`
+already used (pageSize 20, matching the customer/user list precedent).
+Verified live: loan list still renders all 17 loans with correct
+customer/staff names and status badges after adding `with()`; user list's
+roles still line up with the right account after switching from a plain
+array to `$dataProvider->getModels()`; trash page correctly still shows
+(and HTML-encodes, not executes) the one leftover soft-deleted
+pentest-payload customer row from earlier testing. Full `php -l` sweep
+and a live smoke test across all 22 app pages, all clean, no errors in
+`app.log`.

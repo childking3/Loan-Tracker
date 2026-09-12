@@ -9,6 +9,7 @@ use app\models\LoanPackage;
 use app\models\Repayment;
 use app\models\User;
 use Yii;
+use yii\data\ActiveDataProvider;
 use yii\filters\AccessControl;
 use yii\filters\VerbFilter;
 use yii\web\Controller;
@@ -83,9 +84,14 @@ class LoanController extends Controller
             $query->andWhere(['like', 'loan_number', $search]);
         }
 
-        $loans = $query->orderBy(['created_at' => SORT_DESC])->all();
+        // with(): the index table shows customer and assigned-staff names
+        // per row - without eager loading here this was a real N+1 (one
+        // query per loan for each relation), found during the same
+        // DB-interaction audit that added the pagination below.
+        $query->with(['customer', 'assignedStaff'])->orderBy(['created_at' => SORT_DESC]);
+        $dataProvider = new ActiveDataProvider(['query' => $query, 'pagination' => ['pageSize' => 20]]);
 
-        return $this->render('index', ['loans' => $loans, 'status' => $status, 'search' => $search]);
+        return $this->render('index', ['dataProvider' => $dataProvider, 'status' => $status, 'search' => $search]);
     }
 
     public function actionView($id)

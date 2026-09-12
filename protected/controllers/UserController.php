@@ -5,6 +5,7 @@ namespace app\controllers;
 use app\components\AuditLogger;
 use app\models\User;
 use Yii;
+use yii\data\ActiveDataProvider;
 use yii\filters\AccessControl;
 use yii\filters\VerbFilter;
 use yii\web\Controller;
@@ -56,10 +57,15 @@ class UserController extends Controller
 
     public function actionIndex()
     {
-        $users = User::find()->orderBy(['full_name' => SORT_ASC])->all();
+        $dataProvider = new ActiveDataProvider([
+            'query' => User::find()->orderBy(['full_name' => SORT_ASC]),
+            'pagination' => ['pageSize' => 20],
+        ]);
+
+        $users = $dataProvider->getModels();
         $roles = $this->currentRoles(array_map(static fn (User $user) => (int) $user->id, $users));
 
-        return $this->render('index', ['users' => $users, 'roles' => $roles]);
+        return $this->render('index', ['dataProvider' => $dataProvider, 'roles' => $roles]);
     }
 
     public function actionCreate()

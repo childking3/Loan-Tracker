@@ -157,9 +157,12 @@ class CustomerController extends Controller
      */
     public function actionTrash()
     {
-        $customers = Customer::findTrashed()->orderBy(['deleted_at' => SORT_DESC])->all();
+        $dataProvider = new ActiveDataProvider([
+            'query' => Customer::findTrashed()->orderBy(['deleted_at' => SORT_DESC]),
+            'pagination' => ['pageSize' => 20],
+        ]);
 
-        return $this->render('trash', ['customers' => $customers]);
+        return $this->render('trash', ['dataProvider' => $dataProvider]);
     }
 
     public function actionRestore($id)

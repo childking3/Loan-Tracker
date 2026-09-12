@@ -1,9 +1,10 @@
 <?php
 
 /** @var \yii\web\View $this */
-/** @var \app\models\Customer[] $customers */
+/** @var \yii\data\ActiveDataProvider $dataProvider */
 
 use yii\helpers\Html;
+use yii\widgets\LinkPager;
 
 $this->title = 'Deleted customers';
 ?>
@@ -13,7 +14,7 @@ $this->title = 'Deleted customers';
 
 <p><?= Html::a('Back to customers', ['customer/index']) ?></p>
 
-<?php if ($customers === []): ?>
+<?php if ($dataProvider->getTotalCount() === 0): ?>
     <p>No deleted customers.</p>
 <?php else: ?>
 <div class="table-scroll">
@@ -27,7 +28,7 @@ $this->title = 'Deleted customers';
     </tr>
     </thead>
     <tbody>
-    <?php foreach ($customers as $customer): ?>
+    <?php foreach ($dataProvider->getModels() as $customer): ?>
         <tr>
             <td><?= Html::encode($customer->full_name) ?></td>
             <td><?= Html::encode($customer->phone) ?></td>
@@ -42,4 +43,6 @@ $this->title = 'Deleted customers';
     </tbody>
 </table>
 </div>
+
+<?= LinkPager::widget(['pagination' => $dataProvider->getPagination()]) ?>
 <?php endif; ?>
