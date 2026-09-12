@@ -5551,3 +5551,25 @@ array to `$dataProvider->getModels()`; trash page correctly still shows
 pentest-payload customer row from earlier testing. Full `php -l` sweep
 and a live smoke test across all 22 app pages, all clean, no errors in
 `app.log`.
+
+While re-checking every controller touching `::find()` for this same
+sweep (not just the ones with a `<table>`), found one more real N+1:
+`ImportController::processFile()` called `Customer::findDuplicatesByPhone()`
+- a query every call - once per CSV row, up to `MAX_ROWS` (2000) queries
+for one import. Replaced with a single prefetch of every existing phone
+into an in-memory map before the loop, extended with each newly-imported
+row's own phone as it saves - so a duplicate *within* the same file is
+still caught exactly as before (row 2 and row 4 sharing a phone), just
+without a second query for it. `RepaymentController` and
+`GuarantorController` were also checked (the only other controllers on
+the `::find()` list not yet reviewed this pass) and are already correct
+as-is - both are single-record creates with one row-lock and one
+`exists()` check per request, not a loop.
+
+Verified live: uploaded a 3-row test CSV with one phone matching an
+existing customer and one phone repeated within the file - both were
+correctly skipped with the right "already belongs to" message (the
+within-file case correctly named the just-imported row, confirming the
+in-memory map extension works), and the one genuinely new row imported
+successfully. Test customer removed immediately after by exact
+name+phone match, per this project's standing test-cleanup rule.

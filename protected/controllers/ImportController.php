@@ -77,16 +77,31 @@ class ImportController extends Controller
     }
 
     /**
-     * Validates against the same rules and duplicate-phone check the web
-     * create form uses, so an imported row is never held to a looser
-     * standard. Unlike the form's warn-then-confirm flow, import skips
-     * duplicates outright and reports them - no per-row confirmation step
-     * makes sense when importing many rows at once.
+     * Validates against the same rules the web create form uses, so an
+     * imported row is never held to a looser standard. Unlike the form's
+     * warn-then-confirm flow, import skips duplicates outright and reports
+     * them - no per-row confirmation step makes sense when importing many
+     * rows at once.
+     *
+     * Duplicate-phone checking is done against $existingPhones (loaded
+     * once below), not Customer::findDuplicatesByPhone() per row - that
+     * method runs a query every call, which at MAX_ROWS would mean up to
+     * 2000 individual SELECTs for one import. $existingPhones is extended
+     * as each row imports, so a duplicate between two rows in the same
+     * file is still caught exactly as before, without a second query
+     * layer for it.
      */
     private function processFile(string $path): array
     {
         $imported = 0;
         $errors = [];
+
+        $existingPhones = [];
+        foreach (Customer::find()->select(['phone', 'full_name'])->asArray()->batch(500) as $batch) {
+            foreach ($batch as $row) {
+                $existingPhones[$row['phone']] = $row['full_name'];
+            }
+        }
 
         $handle = fopen($path, 'r');
         if ($handle === false) {
@@ -149,15 +164,15 @@ class ImportController extends Controller
                 continue;
             }
 
-            $duplicates = $customer->findDuplicatesByPhone();
-            if ($duplicates !== []) {
+            if (isset($existingPhones[$customer->phone])) {
                 if (count($errors) < self::MAX_REPORTED_ERRORS) {
-                    $errors[] = "Row {$rowNumber}: skipped, phone {$customer->phone} already belongs to {$duplicates[0]->full_name}.";
+                    $errors[] = "Row {$rowNumber}: skipped, phone {$customer->phone} already belongs to {$existingPhones[$customer->phone]}.";
                 }
                 continue;
             }
 
             $customer->save(false);
+            $existingPhones[$customer->phone] = $customer->full_name;
             $imported++;
         }
 
