@@ -7,21 +7,17 @@ use app\models\User;
 use Yii;
 
 /**
- * Caches dashboard totals in KeyDB and tracks a single incrementing
- * "version" integer, bumped by bumpVersion() from every write that affects
- * those totals (see Loan::afterSave() for new loans,
- * RepaymentController::actionCreate() for repayments/loan completion, and
- * the console loan/mark-overdue command).
+ * Caches dashboard totals in KeyDB behind a single incrementing "version"
+ * integer, bumped by bumpVersion() from every write that affects the
+ * totals (Loan::afterSave(), RepaymentController::actionCreate(), the
+ * mark-overdue console command).
  *
- * Adapted from HumHub's polling approach (protected/humhub/modules/live),
- * not copied - see CODEBASE.md's "Borrowed from HumHub" section for the
- * comparison and why the shape differs here. HumHub tracks "what changed"
- * with an append-only event-log table filtered by created_at, which suits
- * a busy multi-tenant social feed where many different things can change
- * independently. This dashboard only ever needs to answer one question -
- * "has anything changed since the totals I already have" - so a single
- * KeyDB integer, bumped on write and compared by the poll endpoint, is the
- * proportionate equivalent without needing an extra database table.
+ * Adapted from HumHub's polling approach (protected/humhub/modules/live) -
+ * see CODEBASE.md's "Borrowed from HumHub" section. HumHub tracks "what
+ * changed" via an append-only event-log table, suited to a busy
+ * multi-tenant feed with many independent changes. This dashboard only
+ * needs "has anything changed since my last totals", so a single bumped
+ * KeyDB integer is the proportionate equivalent without an extra table.
  */
 class DashboardCache
 {
@@ -61,14 +57,10 @@ class DashboardCache
         $activeLoanCount = (int) Loan::find()->andWhere(['status' => 'active'])->count();
         $overdueLoanCount = (int) Loan::find()->andWhere(['status' => 'overdue'])->count();
 
-        // remainingBalancesFor(): one GROUP BY query for every active/
-        // overdue loan's amount paid, instead of one KeyDB round trip (or,
-        // cold, one SQL query) per loan via getRemainingBalance()'s own
-        // per-loan cache. This whole result is itself cached by
-        // getTotals() above, so this only runs on a cache miss - but a
-        // cache miss is exactly when the per-loan cache is coldest too,
-        // which used to mean this loop was the worst case for both caches
-        // missing at once.
+        // remainingBalancesFor() does one GROUP BY query for all active/
+        // overdue loans instead of one per-loan cache/SQL round trip via
+        // getRemainingBalance() - avoids the worst case where this cache
+        // miss coincides with the per-loan cache also being cold.
         $activeOrOverdueLoans = Loan::find()->andWhere(['in', 'status', ['active', 'overdue']])->all();
         $outstandingBalance = array_sum(Loan::remainingBalancesFor($activeOrOverdueLoans));
 
@@ -76,14 +68,11 @@ class DashboardCache
             'SELECT COALESCE(SUM(amount), 0) FROM {{%repayment}} WHERE payment_date = :today'
         )->bindValue(':today', date('Y-m-d'))->queryScalar();
 
-        // Admins are excluded from this table at the user's explicit
-        // request: an admin can be assigned loans/repayments like anyone
-        // else technically, but "staff performance" is meant to track the
-        // loan officers actually doing collections, not the account(s)
-        // managing them. Excluded by RBAC role, not by a column on `user`
-        // (there isn't one - role lives entirely in auth_assignment), so
-        // the id list is fetched separately and passed in as bound
-        // placeholders rather than interpolated directly.
+        // Admins excluded from staff performance by explicit request -
+        // this table tracks loan officers doing collections, not accounts
+        // managing them. Excluded by RBAC role (no column for it on
+        // `user`; role lives in auth_assignment), ids passed as bound
+        // placeholders.
         $adminIds = array_map('intval', Yii::$app->authManager->getUserIdsByRole(User::ROLE_ADMIN));
         $excludeAdmins = '';
         $params = [':active' => 'active', ':statusActive' => User::STATUS_ACTIVE];

@@ -18,16 +18,12 @@ use yii\web\NotFoundHttpException;
 /**
  * Loan creation and viewing.
  *
- * Authorization here has two layers, matching how the RBAC was designed in
- * Phase 2: a coarse controller-level gate (AccessControl, below) that only
- * confirms the user is allowed to use this controller at all, and a
- * fine-grained per-record check inside actionView() that actually exercises
- * IsAssignedStaffRule - the rule attached to viewAssignedLoans since Phase 2
- * but never exercised until now. That rule requires a loan instance to
- * check against, so it cannot gate a plain permission name the way
- * AccessControl's 'roles' list normally works; actionIndex()'s list view is
- * scoped to the current user's assigned loans with a plain WHERE clause
- * instead, which is the list-view equivalent of the same restriction.
+ * Authorization has two layers: a coarse controller-level gate
+ * (AccessControl) and a fine-grained per-record check in actionView()
+ * exercising IsAssignedStaffRule, which needs a loan instance so it
+ * can't gate a plain permission name via AccessControl's 'roles' list.
+ * actionIndex()'s list view achieves the same restriction with a plain
+ * WHERE clause instead.
  */
 class LoanController extends Controller
 {
@@ -50,9 +46,7 @@ class LoanController extends Controller
                 ],
             ],
             // Explicit GET+POST, not left open to every verb by default -
-            // see CustomerController's own comment on the same pattern,
-            // added the same security-recheck pass. actionCreate() renders
-            // a GET form and processes a POST submission of it.
+            // see CustomerController's comment on the same pattern.
             'verbs' => [
                 'class' => VerbFilter::class,
                 'actions' => [
@@ -77,21 +71,12 @@ class LoanController extends Controller
             $query->andWhere(['status' => $status]);
         }
 
-        // Search by loan number, added on top of the RBAC scoping above
-        // (the $query built in the if/elseif block), not a fresh
-        // unscoped one - a staff account's ['like', 'loan_number', ...]
-        // condition still combines with AND against their own
-        // assigned_staff_id restriction, so a search term can only ever
-        // narrow what they already see, never widen it to another
-        // staff member's loans. Same non-scalar-input guard
-        // CustomerController::actionIndex() already uses for its own
-        // `q` param (a ?q[]=x query string makes request->get() return
-        // an array, and this app treats that as "no search term" rather
-        // than erroring) - and the same reason: Yii's own `like`
-        // condition array-format parameterizes the value and escapes
-        // LIKE wildcards in it, so this is safe against both SQL
-        // injection and a search term that's itself trying to abuse `%`/
-        // `_` wildcards to match more broadly than intended.
+        // Search added on top of the RBAC-scoped $query above (AND'd
+        // with assigned_staff_id for staff), so it can only narrow what
+        // they already see, never widen it. Same non-scalar-input guard
+        // as CustomerController::actionIndex()'s `q` param. Yii's `like`
+        // condition array-format parameterizes and escapes wildcards,
+        // safe against both injection and wildcard abuse.
         $rawSearch = Yii::$app->request->get('q', '');
         $search = trim(is_string($rawSearch) ? $rawSearch : '');
         if ($search !== '') {
@@ -153,16 +138,11 @@ class LoanController extends Controller
                 $model->addError('package_id', 'Select a valid, active loan package.');
             } elseif ($isValid) {
                 // Same double-submit gap as repayments (see
-                // RepaymentController::actionCreate() for the full
-                // reasoning) - confirmed live: 5 concurrent identical
-                // submissions here created 5 separate real loans for one
-                // customer. Guarded the same way: a row lock on the
-                // customer to serialize concurrent attempts, plus a short
-                // window rejecting another loan with the same
-                // customer/package/assigned staff recorded in the last 10
-                // seconds. Deliberately short, not permanent - a customer
-                // genuinely taking out two loans with the same package
-                // later the same day must not be blocked.
+                // RepaymentController::actionCreate()): guarded with a
+                // row lock on the customer plus a short window rejecting
+                // a duplicate customer/package/staff loan created in the
+                // last 10 seconds - short, not permanent, since a genuine
+                // second same-day loan must not be blocked.
                 $duplicate = false;
                 $transaction = Yii::$app->db->beginTransaction();
                 try {
@@ -184,20 +164,11 @@ class LoanController extends Controller
                         $model->applyPackageTerms($package);
                         $model->created_by = Yii::$app->user->id;
                         $model->save(false);
-                        // refresh() before snapshotting for the audit log,
-                        // not just save(false): status has a DB-level
-                        // DEFAULT 'active' (m260910_.._create_loan_table)
-                        // that the PHP model never sets itself, so
-                        // getAttributes() right after save() still shows
-                        // status as null in memory even though the row
-                        // MariaDB actually wrote has 'active' - confirmed
-                        // live during this Phase 9 pass, the first audit
-                        // log entry this action ever produced recorded
-                        // exactly that wrong null. An audit trail that
-                        // silently records the wrong value for a field is
-                        // worse than one with a gap, since nothing about
-                        // it looks wrong until compared against the row it
-                        // describes.
+                        // refresh() before snapshotting for the audit log:
+                        // status has a DB-level DEFAULT 'active' the PHP
+                        // model never sets, so getAttributes() right after
+                        // save() would still show null in memory even
+                        // though the row itself has 'active'.
                         $model->refresh();
                         // Written inside the same transaction as the loan
                         // itself, not after commit - a real audit trail
@@ -247,12 +218,10 @@ class LoanController extends Controller
     }
 
     /**
-     * Restricted to users holding the staff role specifically, not every
-     * active account - confirmed with the user this wasn't intentional
-     * before, since every other part of the app that deals with "assigned
-     * staff" (IsAssignedStaffRule, the staff performance report) already
-     * assumes it names an actual staff member, not a manager or admin's
-     * own account.
+     * Restricted to the staff role specifically, not every active
+     * account - every other part of the app dealing with "assigned
+     * staff" (IsAssignedStaffRule, staff performance report) assumes it
+     * names an actual staff member, not a manager/admin.
      */
     private function staffOptions(): array
     {

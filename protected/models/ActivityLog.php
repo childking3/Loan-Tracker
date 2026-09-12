@@ -7,14 +7,12 @@ use yii\db\ActiveQuery;
 use yii\db\ActiveRecord;
 
 /**
- * ActiveRecord for the activity_log table (created in
- * m260910_190500_create_activity_log_table, unused until Phase 9).
+ * ActiveRecord for the activity_log table.
  *
- * Read-only from the application's point of view: rows are written
- * exclusively through app\components\AuditLogger, never through this class
- * directly, and there is deliberately no update/delete action anywhere -
- * an audit trail that could be edited or removed by the same roles it is
- * meant to hold accountable is not an audit trail.
+ * Read-only from the app's point of view: rows are written only through
+ * AuditLogger, never directly, and there's no update/delete action anywhere
+ * - an audit trail editable by the roles it holds accountable isn't an
+ * audit trail.
  */
 class ActivityLog extends ActiveRecord
 {
@@ -29,24 +27,17 @@ class ActivityLog extends ActiveRecord
     }
 
     /**
-     * Fields never worth showing in a log view even though they're part
-     * of the raw attribute snapshot every AuditLogger::audit() call
-     * stores - password_hash/auth_key are meaningless to a human reader
-     * and there is no reason to widen a hash's exposure surface for
-     * zero audit value; updated_at/created_at change on every save (or
-     * duplicate the "When" column, which is this same log row's own
-     * created_at) and carry no information about what actually
-     * happened; id is present on one side only for a create/delete, so
-     * it would otherwise show a redundant "id: — -> 3035" line right
-     * next to the entity name that already identifies the record.
+     * Fields excluded from every diff view: password_hash/auth_key are
+     * meaningless to a reader and shouldn't widen a hash's exposure
+     * surface; updated_at/created_at duplicate the log row's own "When"
+     * column; id is redundant with the entity name already shown.
      */
     private const EXCLUDED_KEYS = ['id', 'password_hash', 'auth_key', 'updated_at', 'created_at'];
 
     /**
-     * The one field per entity type that's already shown verbatim in
-     * the Entity column (LogController::resolveEntityNames() reads the
-     * exact same column) - excluded from the diff for the same reason
-     * as `id` above, just per-entity-type instead of universal.
+     * Per-entity field already shown in the Entity column
+     * (LogController::resolveEntityNames() reads the same column) -
+     * excluded from the diff for the same reason as `id` above.
      */
     private const PRIMARY_FIELD_BY_TYPE = [
         'customer' => 'full_name',
@@ -54,25 +45,16 @@ class ActivityLog extends ActiveRecord
         'loan_package' => 'name',
         'guarantor' => 'full_name',
         'user' => 'username',
-        // repayment has no name column of its own - LogController's
-        // resolveEntityNames() builds its Entity-column display value
-        // ("Repayment on LN-000024") from this same field via a join,
-        // so it's just as redundant to repeat here as the others above.
+        // repayment has no name column - its Entity-column display
+        // ("Repayment on LN-000024") is built from this field via a join.
         'repayment' => 'loan_id',
     ];
 
     /**
-     * Plain-language labels for every column that appears in any
-     * entity's attribute snapshot - a raw column name
-     * ("assigned_staff_id", "principal_amount") means nothing to the
-     * non-technical staff this log is actually written for. Kept as
-     * its own map here rather than reusing each model's own
-     * attributeLabels(): several of these columns (customer_id,
-     * assigned_staff_id, created_by, loan_id, recorded_by_staff_id) are
-     * never present in any editable form in the first place, so no
-     * existing label covers them, and a log entry's audience/context
-     * ("who did this, to what") is different enough from a form's that
-     * the two aren't necessarily the same wording anyway.
+     * Plain-language labels for raw column names, kept separate from
+     * each model's attributeLabels(): several columns here (customer_id,
+     * assigned_staff_id, created_by, recorded_by_staff_id...) never
+     * appear in an editable form, so no existing label covers them.
      */
     private const FIELD_LABELS = [
         'loan_number' => 'Loan number',
@@ -106,10 +88,9 @@ class ActivityLog extends ActiveRecord
     ];
 
     /**
-     * Columns that store another table's id - shown as that record's
-     * own display name (resolved the same batched way as the Entity
-     * column, see LogController::resolveEntityNames()) instead of a
-     * bare number a reader would have to go look up themselves.
+     * Columns storing another table's id - resolved to that record's
+     * display name (batched via LogController::resolveEntityNames())
+     * instead of showing a bare id.
      */
     private const FOREIGN_KEYS = [
         'customer_id' => 'customer',
@@ -123,30 +104,19 @@ class ActivityLog extends ActiveRecord
     private const CURRENCY_FIELDS = ['principal_amount', 'total_repayment', 'daily_payment', 'amount', 'loan_amount'];
 
     /**
-     * Reduces this row's old_value/new_value JSON into just the fields
-     * that actually changed - both create (old_value === null, so
-     * everything in new_value is "new") and delete (the reverse) are
-     * handled the same way as update (both non-null, most keys usually
-     * identical between the two full snapshots) rather than as special
-     * cases, since a plain per-key comparison already produces the
-     * right result for all three: only keys whose old and new value
-     * differ end up in the returned array.
+     * Reduces old_value/new_value JSON to just the fields that changed.
+     * Create (old null) and delete (new null) fall out of the same
+     * per-key comparison as update, with no special-casing needed.
      *
      * @return array<string, array{old: mixed, new: mixed}>
      */
     public function getChanges(): array
     {
-        // old_value/new_value are native MySQL JSON columns - yii\db\mysql\
-        // ColumnSchema::phpTypecast() already json_decode()s them into a
-        // plain PHP array the moment this row is loaded via ActiveRecord,
-        // so $this->old_value/$this->new_value are arrays already by the
-        // time this method runs. Decoding them again used to be exactly
-        // matched by a symmetric double-encoding bug in AuditLogger::
-        // write() (see its own comment), so it happened to produce the
-        // right array anyway for every row written through that method -
-        // until a correctly single-encoded row (written directly via SQL)
-        // hit this same double-decode and threw, since Json::decode()
-        // rejects an already-array argument outright.
+        // old_value/new_value are native JSON columns - ColumnSchema::
+        // phpTypecast() already decodes them into arrays on load, so
+        // decoding again here would throw (Json::decode() rejects an
+        // already-array argument). A matching double-encode bug in
+        // AuditLogger::write() used to mask this; fixed there too.
         $old = $this->old_value ?? [];
         $new = $this->new_value ?? [];
 
@@ -169,11 +139,9 @@ class ActivityLog extends ActiveRecord
     }
 
     /**
-     * Every foreign-key-shaped value referenced anywhere in this row's
-     * changes, grouped by which entity type it points at - handed to
-     * LogController::resolveEntityNames() so it can batch these into
-     * the same lookup query it already runs for the Entity column,
-     * rather than the view resolving one id at a time while rendering.
+     * Foreign-key values in this row's changes, grouped by entity type -
+     * feeds LogController::resolveEntityNames() so ids are batch-resolved
+     * instead of one query per id at render time.
      *
      * @return array<string, int[]> entity_type => ids
      */
@@ -201,12 +169,9 @@ class ActivityLog extends ActiveRecord
     }
 
     /**
-     * $entityNames is the same [entity_type => [id => name]] map
-     * LogController::resolveEntityNames() builds for the Entity column -
-     * passed in here rather than queried per value, so formatting a
-     * whole page of changes stays at the one batched query per entity
-     * type that resolveEntityNames() already runs, not a query per
-     * foreign-key value rendered.
+     * $entityNames is the same map resolveEntityNames() builds for the
+     * Entity column, passed in rather than queried per value so a page
+     * of changes stays at one batched query per entity type.
      */
     public static function formatChangeValue(string $field, $value, array $entityNames = []): string
     {
@@ -223,10 +188,8 @@ class ActivityLog extends ActiveRecord
             return Currency::format((float) $value);
         }
 
-        // Loan/LoanPackage status columns are already human-readable
-        // strings ('active', 'completed', ...) - is_numeric() is false
-        // for those, so this branch only ever fires for User's integer
-        // status column (User::STATUS_ACTIVE = 10, STATUS_INACTIVE = 0).
+        // Loan/LoanPackage status values are strings already; this only
+        // fires for User's integer status (STATUS_ACTIVE=10/INACTIVE=0).
         if ($field === 'status' && is_numeric($value)) {
             return (int) $value === User::STATUS_ACTIVE ? 'Active' : 'Inactive';
         }

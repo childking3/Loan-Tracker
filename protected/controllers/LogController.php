@@ -9,16 +9,13 @@ use yii\filters\AccessControl;
 use yii\web\Controller;
 
 /**
- * Read-only viewer for the activity_log table, split into the two
- * permissions the RBAC design has kept apart since Phase 2
- * (m260910_200000_init_rbac): viewAuditLog (manager and up) for data
- * changes, viewAccessLogs (admin only) for login/logout activity - see
- * app\components\AuditLogger for what gets written and why the split
- * matches the client brief's requirement that these stay distinct
- * permissions even though both categories share one physical table.
+ * Read-only viewer for activity_log, split into two permissions:
+ * viewAuditLog (manager+) for data changes, viewAccessLogs (admin only)
+ * for login/logout - both share one physical table but the brief
+ * requires them to stay distinct permissions (see AuditLogger).
  *
- * There is deliberately no export/delete/edit action here - an audit
- * trail a user can prune is not a defense against that same user.
+ * No export/delete/edit action here - an audit trail a user can prune is
+ * not a defense against that same user.
  */
 class LogController extends Controller
 {
@@ -77,14 +74,10 @@ class LogController extends Controller
     }
 
     /**
-     * One batched query per entity_type present on the current page,
-     * not one query per row - the same N+1-avoidance discipline used
-     * everywhere else in this app. Reads the display name straight from
-     * SQL rather than through each model's own find() (which would
-     * silently exclude a soft-deleted Customer, for example) - a log
-     * entry about an action taken against a record is still meaningful
-     * after that record is later deleted, and should still show who it
-     * was about.
+     * One batched query per entity_type on the page, not one per row.
+     * Reads names via raw SQL rather than each model's find(), which
+     * would silently exclude a soft-deleted record - a log entry should
+     * still show who it was about even after the record is deleted.
      *
      * @param ActivityLog[] $entries
      * @return array<string, array<int, string>> entity_type => [entity_id => display name]
@@ -97,12 +90,10 @@ class LogController extends Controller
                 $idsByType[$entry->entity_type][] = (int) $entry->entity_id;
             }
 
-            // Every foreign-key value inside this row's own changes
-            // (e.g. a loan's customer_id, package_id, assigned_staff_id)
-            // needs the same name resolution the Entity column gets -
-            // merged into the same $idsByType map so it's covered by
-            // the one batched query per type below instead of a second
-            // wave of per-row lookups.
+            // FK values inside this row's own changes (e.g. a loan's
+            // customer_id, package_id) need the same name resolution -
+            // merged into the same $idsByType map to stay covered by the
+            // one batched query below.
             foreach ($entry->getForeignKeyReferences() as $type => $ids) {
                 foreach ($ids as $id) {
                     $idsByType[$type][] = $id;
@@ -111,10 +102,8 @@ class LogController extends Controller
         }
 
         // [entity_type => [table, id column, name expression]] - name
-        // expression is a raw SQL fragment so repayment (which has no
-        // single "name" column of its own) can express its display
-        // value as a small join instead of needing special-cased code
-        // below.
+        // expression is a raw SQL fragment so repayment (no single "name"
+        // column) can express its display value via a join.
         $lookups = [
             'customer' => ['{{%customer}}', 'id', 'full_name'],
             'loan' => ['{{%loan}}', 'id', 'loan_number'],

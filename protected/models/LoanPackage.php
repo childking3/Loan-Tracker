@@ -6,18 +6,14 @@ use yii\behaviors\TimestampBehavior;
 use yii\db\ActiveRecord;
 
 /**
- * ActiveRecord for the loan_package table: the client's five fixed loan
- * packages. Read-only from the loan module's point of view (LoanController
- * only ever reads a package's terms via applyPackageTerms() - editing them
- * is LoanPackageController's job, added in Phase 9 alongside rules(),
- * attributeLabels() and TimestampBehavior, none of which existed before
- * since every row was previously written only by a migration).
+ * ActiveRecord for the loan_package table: five fixed loan packages per
+ * the client brief. Read-only from the loan module (LoanController reads
+ * terms via applyPackageTerms(); editing is LoanPackageController's job).
  *
- * There is no create or delete action anywhere for this model, by explicit
- * decision: the client brief describes exactly five fixed packages, not an
- * open-ended set, and is_active already exists for retiring a package
- * without erasing loans that reference it via loan.package_id (RESTRICT) -
- * the same reasoning as Customer's soft-delete and User's deactivation.
+ * No create or delete action exists by design - is_active retires a
+ * package without breaking loans that reference it via loan.package_id
+ * (RESTRICT), the same pattern as Customer's soft-delete and User's
+ * deactivation.
  */
 class LoanPackage extends ActiveRecord
 {
@@ -41,11 +37,9 @@ class LoanPackage extends ActiveRecord
             ['name', 'string', 'max' => 100],
             [['loan_amount', 'total_repayment', 'daily_payment'], 'number', 'min' => 0.01],
             ['repayment_period_days', 'integer', 'min' => 1],
-            // A loan that repays less than it lent isn't a loan this
-            // business would issue - a plain sanity check on real money
-            // figures an admin now enters by hand, which nothing validated
-            // before since every prior row came from a migration the
-            // developer wrote once and could review by eye.
+            // A loan that repays less than it lent isn't one this business
+            // would issue - sanity check now that an admin enters figures
+            // by hand instead of a reviewed migration.
             ['total_repayment', 'compare', 'compareAttribute' => 'loan_amount', 'operator' => '>=', 'message' => 'Total repayment cannot be less than the loan amount.'],
             ['is_active', 'boolean'],
         ];

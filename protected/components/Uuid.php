@@ -7,20 +7,15 @@ use Yii;
 /**
  * A single static method: a standard, RFC 4122 version-4 UUID.
  *
- * Compared against HumHub's own `humhub\libs\UUID::v4()`
+ * Compared against HumHub's `humhub\libs\UUID::v4()`
  * (protected/humhub/libs/UUID.php, Copyright HumHub GmbH & Co. KG - see
- * CODEBASE.md's "Borrowed from HumHub" section) before writing this - the
- * output format is the same, but the randomness source deliberately is
- * not: HumHub's version pulls two of the five fields from mt_rand()
- * (Mersenne Twister, not cryptographically secure) and only the other
- * three from a CSPRNG. That's fine for HumHub's own use (a file's guid is
- * a unique lookup key, not itself an access-control boundary - real
- * permission checks happen separately in File::canRead()/canView()), but
- * this project already generates every other random identifier
- * (avatar filenames until now, auth_key, the CSP nonce) from
- * Yii::$app->security's CSPRNG throughout, so this reuses that same
- * source for all 122 usable bits rather than mixing in a weaker one just
- * to match HumHub's exact implementation.
+ * CODEBASE.md's "Borrowed from HumHub" section): same output format, but
+ * randomness source differs deliberately. HumHub pulls 2 of 5 fields from
+ * mt_rand() (not a CSPRNG) and the rest from a CSPRNG - fine there since a
+ * file guid is just a lookup key, not an access-control boundary. This
+ * app already sources every other identifier (avatar filenames, auth_key,
+ * CSP nonce) from Yii::$app->security's CSPRNG, so this reuses that for
+ * all 122 usable bits instead of mixing in a weaker source.
  */
 class Uuid
 {

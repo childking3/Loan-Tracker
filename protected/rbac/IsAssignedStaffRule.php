@@ -5,18 +5,10 @@ namespace app\rbac;
 use yii\rbac\Rule;
 
 /**
- * Restricts a permission check to loans assigned to the current user.
- *
- * Attached to the viewAssignedLoans permission so that a check such as
- * Yii::$app->user->can('viewAssignedLoans', ['loan' => $loan]) returns true
- * only when $loan->assigned_staff_id matches the user performing the check.
- * This enforces row-level access at the RBAC layer itself, rather than
- * relying on a controller-level if statement, closing the IDOR gap
- * identified in the client brief's pentest checklist.
- *
- * $params['loan'] is expected to be a Loan ActiveRecord (introduced in a
- * later phase); this rule has no effect until a controller actually passes
- * one in.
+ * Restricts the viewAssignedLoans permission to loans assigned to the
+ * current user - enforced at the RBAC layer instead of a controller-level
+ * if statement, closing an IDOR gap. Requires $params['loan'] (a Loan AR)
+ * to be passed by the caller; has no effect otherwise.
  */
 class IsAssignedStaffRule extends Rule
 {

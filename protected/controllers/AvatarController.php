@@ -11,33 +11,25 @@ use yii\web\NotFoundHttpException;
 use yii\web\Response;
 
 /**
- * Streams a user's avatar image. A separate controller rather than a
- * plain static/ file, since the image itself lives in
- * protected/uploads/avatars/ - outside the public docroot (see
- * AvatarStorage's own docblock for why) - and so has no directly
- * fetchable URL of its own; this is the only way to reach one.
+ * Streams a user's avatar. A separate controller rather than a plain
+ * static/ file, since images live in protected/uploads/avatars/, outside
+ * the public docroot (see AvatarStorage) - this is the only way to
+ * reach one.
  *
  * Gated on '@' (any authenticated user), not a specific permission -
  * every logged-in user needs to see every other user's avatar (header,
- * staff list), the same breadth User::find() itself already allows for
- * any authenticated read.
+ * staff list), matching the breadth User::find() already allows.
  *
- * The URL this action is reached at (avatar/view?id=X) never changes for
- * a given user, even across a re-upload - unlike HumHub's own profile
- * image URL, which embeds a `?m=<filemtime>` cache-busting query string
- * (protected/humhub/libs/ProfileImage.php::getUrl()). Found by comparing
- * against that while adopting this feature's filename scheme: with a
- * fixed URL and the long Cache-Control below, a browser that already
- * cached the old picture would keep showing it for up to a year after a
- * genuine re-upload, with nothing to force a refetch. Every view that
- * builds this URL (layouts/main.php, views/site/profile.php,
- * views/user/index.php, views/user/update.php) appends the user's
- * current avatar_filename as a `v` query parameter instead of a
- * timestamp - cheaper than an extra filemtime() call, since the
- * filename already changes on every upload (see AvatarStorage) and is
- * already loaded on every one of those pages regardless. This action
- * itself never reads `v` - it exists purely as a browser cache key, the
- * same role HumHub's `?m=` plays.
+ * This action's URL (avatar/view?id=X) never changes across a
+ * re-upload, unlike HumHub's own profile image URL, which embeds a
+ * `?m=<filemtime>` cache-busting query string
+ * (protected/humhub/libs/ProfileImage.php::getUrl()). Without that, a
+ * browser caching the long Cache-Control below would keep showing a
+ * stale picture for up to a year after a re-upload. Every view that
+ * builds this URL instead appends the current avatar_filename as a `v`
+ * parameter - cheaper than filemtime() since the filename already
+ * changes on upload (see AvatarStorage). This action never reads `v`;
+ * it exists purely as a cache key, playing HumHub's `?m=` role.
  */
 class AvatarController extends Controller
 {
@@ -68,12 +60,10 @@ class AvatarController extends Controller
             throw new NotFoundHttpException('No avatar.');
         }
 
-        // Safe to cache long and immutable: the URL is only ever reused
-        // unchanged for the exact same file content, since every caller
-        // includes the current avatar_filename as a `v` cache-busting
-        // parameter (see this class's own docblock) - a real change
-        // always arrives at a different URL instead of invalidating this
-        // one.
+        // Safe to cache long and immutable: every caller appends the
+        // current avatar_filename as a `v` parameter (see class
+        // docblock), so a real change arrives at a different URL rather
+        // than needing invalidation.
         Yii::$app->response->headers->set('Cache-Control', 'private, max-age=31536000, immutable');
 
         return Yii::$app->response->sendFile($path, null, ['inline' => true]);

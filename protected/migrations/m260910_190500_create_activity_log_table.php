@@ -5,19 +5,16 @@ use yii\db\Migration;
 /**
  * Creates the activity_log table.
  *
- * A single physical table serves two distinct RBAC permissions: viewAuditLog
- * (category = audit, for data change history) and viewAccessLogs (category =
- * access, for login/logout and access events). The client brief requires
- * these stay separate permissions even though they share one table, so
- * category is filtered at the query layer, not split into two tables.
+ * One physical table serves two RBAC permissions - viewAuditLog (category =
+ * audit) and viewAccessLogs (category = access) - filtered at the query
+ * layer rather than split into two tables.
  *
- * user_id is nullable with ON DELETE SET NULL, unlike the RESTRICT used on
- * the other user foreign keys in this schema: log rows must survive even if
- * the acting user is later removed, and some entries (a scheduled console
- * command such as the overdue-marking job) have no acting user at all.
+ * user_id is nullable with ON DELETE SET NULL, unlike RESTRICT elsewhere in
+ * this schema: log rows must survive a removed user, and some entries (e.g.
+ * a scheduled job) have no acting user at all.
  *
- * old_value/new_value use the native MySQL JSON type to store a snapshot of
- * changed fields without needing a separate table per entity type.
+ * old_value/new_value use native MySQL JSON to store changed-field snapshots
+ * without a separate table per entity type.
  */
 class m260910_190500_create_activity_log_table extends Migration
 {

@@ -3,16 +3,12 @@
 use yii\db\Migration;
 
 /**
- * Creates the user table.
+ * User table: backs auth/identity and is the FK target for customer, loan,
+ * repayment and activity_log (created_by, assigned_staff_id,
+ * recorded_by_staff_id, user_id) - created first so those FKs can be added.
  *
- * This table backs both the web application's identity/auth system (Phase 2)
- * and the foreign keys referenced by customer, loan, repayment and
- * activity_log below (created_by, assigned_staff_id, recorded_by_staff_id,
- * user_id). It is created first so those foreign keys can be added.
- *
- * auth_key follows the standard Yii2 identity convention: a random per-user
- * string used to validate the "remember me" cookie, unrelated to the RBAC
- * auth_* tables created separately by the framework's own RBAC migration.
+ * auth_key is the standard Yii2 "remember me" cookie validation key, unrelated
+ * to the RBAC auth_* tables created by the framework's own RBAC migration.
  */
 class m260910_190000_create_user_table extends Migration
 {

@@ -12,16 +12,12 @@ use yii\web\NotFoundHttpException;
 
 /**
  * Admin-only editing of the client's five loan packages, gated on
- * manageSettings (existed since Phase 2's RBAC migration with no
- * controller behind it until this Phase 9 follow-up, at the user's
- * explicit request - this was the single highest-priority item left from
- * the Phase 9 review, since without it the placeholder figures seeded in
- * Phase 1 could only ever be replaced via raw SQL).
+ * manageSettings.
  *
- * List and edit only, deliberately - no actionCreate, no actionDelete. The
- * client brief describes exactly five fixed packages, not an open-ended
- * set an admin can add to or remove from; see LoanPackage's own docblock
- * for why deactivation (is_active) exists instead of delete.
+ * List and edit only, deliberately - no create/delete. The brief
+ * describes exactly five fixed packages, not an open-ended set; see
+ * LoanPackage's own docblock for why deactivation (is_active) exists
+ * instead of delete.
  */
 class LoanPackageController extends Controller
 {

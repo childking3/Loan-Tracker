@@ -8,4 +8,11 @@
 !/protected/runtime/sessions/.gitkeep
 /protected/uploads/avatars/*
 !/protected/uploads/avatars/.gitkeep
-/PENTEST_REFERENCE.md
+
+# All top-level docs except CODEBASE.md - PENTEST_REFERENCE.md, README.md,
+# PHASE9_REVIEW.md, POLLING_COMPARISON.md, etc. Scoped to the repo root
+# only (leading /) so the vendored Yii2 framework's own bundled .md files
+# (LICENSE.md, CHANGELOG.md, protected/framework/**) stay tracked - those
+# are third-party license/changelog files, not this app's own docs.
+/*.md
+!/CODEBASE.md

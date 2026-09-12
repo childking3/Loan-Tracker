@@ -18,18 +18,14 @@ class KeydbCache extends Cache
     private \Redis $_redis;
 
     /**
-     * pconnect() rather than connect(): every one of this app's Redis calls
-     * is a single atomic command (GET/SET/INCR/EXPIRE, checked - nothing
-     * here uses MULTI/pipeline), so there is no multi-command transaction
-     * state that could leak from one request into the next by reusing the
-     * underlying socket. That makes this the safe half of the connection-
-     * reuse question; see db.php for the half that was measured and
-     * rejected. Confirmed live: this cache backs the dashboard's poll
-     * endpoint (DashboardCache::getVersion()), which every open dashboard
-     * tab hits once a second - by far the highest-frequency round trip
-     * anywhere in the app - so this is where reusing the TCP connection
-     * instead of reopening it every request actually matters, unlike the
-     * database connection where request volume is nowhere near this high.
+     * pconnect() rather than connect(): every call here is a single atomic
+     * command (no MULTI/pipeline), so there's no transaction state that
+     * could leak across requests via the reused socket. Worth it because
+     * this cache backs the dashboard poll endpoint
+     * (DashboardCache::getVersion()), hit once a second by every open tab -
+     * the highest-frequency round trip in the app, unlike the database
+     * connection (see db.php) where volume never justified the same
+     * tradeoff.
      */
     public function init(): void
     {
@@ -78,16 +74,12 @@ class KeydbCache extends Cache
     }
 
     /**
-     * Atomically increments a counter key via Redis's own INCR, setting its
-     * TTL only on the request that actually creates the key. Added during
-     * the Phase 9 hardening pass for LoginForm's failed-attempt counter,
-     * which previously did get() then set(current + 1) - a classic
-     * read-modify-write race: two near-simultaneous failed attempts against
-     * the same username can both read the same starting count and each
-     * independently write count + 1, undercounting real attempts and
-     * letting a few extra guesses through before the lockout engages.
-     * INCR is a single atomic operation on the Redis server, so concurrent
-     * callers serialize there instead of racing in PHP.
+     * Atomic INCR-based counter for LoginForm's failed-attempt throttle,
+     * TTL set only on the request that creates the key. Replaces a prior
+     * get()-then-set(current+1) pattern: that read-modify-write race let
+     * two near-simultaneous failed attempts undercount, letting extra
+     * guesses through before lockout. INCR serializes concurrent callers
+     * on the Redis server instead of racing in PHP.
      */
     public function increment(string $key, int $ttl): int
     {
@@ -102,20 +94,11 @@ class KeydbCache extends Cache
 
     /**
      * Reads a counter written by increment(), bypassing the inherited
-     * get()/getValue() path entirely.
-     *
-     * Caught live while testing this Phase 9 change, not spotted by
-     * review: yii\caching\Cache::get() runs unserialize() on whatever
-     * getValue() returns, because ordinary Cache::set() always stores a
-     * PHP-serialized value first. increment() above writes a raw integer
-     * via Redis's own INCR instead - there is no serialize() step to
-     * match, since INCR only operates on plain integer strings. Calling
-     * the stock get() against a key increment() had touched threw an
-     * uncaught unserialize() ErrorException, which would have 500'd the
-     * login page on every attempt after the first failed one - worse than
-     * the race condition this change was meant to fix. This method reads
-     * the same raw format increment() writes; LoginForm's throttle check
-     * must use this instead of cache->get() for this specific key.
+     * get()/getValue() path. Necessary because Cache::get() unserializes
+     * whatever getValue() returns, but increment() writes a raw integer via
+     * INCR with no serialize() step - the stock get() would throw an
+     * uncaught unserialize() error on any key increment() touched. Callers
+     * must use this instead of cache->get() for counter keys.
      */
     public function getCounter(string $key): int
     {

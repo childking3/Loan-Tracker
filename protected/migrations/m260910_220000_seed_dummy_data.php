@@ -8,22 +8,17 @@ use app\models\User;
 use yii\db\Migration;
 
 /**
- * Seeds realistic dummy data - two additional staff accounts, six
- * customers, seven loans in a mix of states, and repayments spread across
- * several dates - so the dashboard, loan/customer listings, and every
- * report in Phase 7 have something meaningful to show instead of empty
- * tables. Every account, customer and loan here is fictional test data,
- * not real client information.
+ * Seeds two staff accounts, six customers, seven loans in a mix of states,
+ * and repayments across several dates, so the dashboard, listings and
+ * reports have realistic data instead of empty tables. All fictional test
+ * data, not real client information.
  *
- * Data is created through the same ActiveRecord classes and business logic
- * the real application uses (Loan::applyPackageTerms(), the loan_number
- * generation in Loan::afterSave(), Repayment's own validation), not raw
- * INSERT statements, so seeded rows are indistinguishable in shape from
- * ones a real user would create. Loans that are meant to end up overdue
- * are seeded as 'active' with a past expected_completion_date and left
- * unpaid - actually marking them overdue is left to a real run of
- * `php yii loan/mark-overdue`, the same command a cron job would run,
- * rather than setting status='overdue' directly here.
+ * Data is created through the real AR classes and business logic
+ * (Loan::applyPackageTerms(), loan_number generation, Repayment validation),
+ * not raw INSERTs, so seeded rows are indistinguishable from real ones.
+ * Loans meant to end up overdue are seeded 'active' with a past
+ * expected_completion_date and left unpaid - actually marking them overdue
+ * is left to a real run of `php yii loan/mark-overdue`, not set directly here.
  */
 class m260910_220000_seed_dummy_data extends Migration
 {
@@ -71,9 +66,8 @@ class m260910_220000_seed_dummy_data extends Migration
         $this->seedRepayment($loan2, 5000, '2026-08-20', $staff1->id);
         $this->seedRepayment($loan2, 3000, '2026-09-10', $staff1->id);
 
-        // Fully repaid - Repayment/actionCreate-equivalent completion logic
-        // applied manually below since this migration inserts repayments
-        // directly rather than through RepaymentController.
+        // Fully repaid - completion logic applied manually since this seeds
+        // repayments directly, bypassing RepaymentController.
         $loan3 = $this->seedLoan($customers['fatima'], $packageC, '2026-07-01', $staff2->id, $adminId);
         $this->seedRepayment($loan3, 10000, '2026-07-10', $staff2->id);
         $this->seedRepayment($loan3, 13000, '2026-08-10', $staff2->id);

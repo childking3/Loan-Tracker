@@ -9,17 +9,14 @@ use yii\db\ActiveQuery;
 /**
  * ActiveRecord for the customer table.
  *
- * find() is overridden to exclude soft-deleted rows (deleted_at IS NOT
- * NULL) by default, so every normal lookup - findOne(), the index listing,
- * relations from Loan in a later phase - automatically behaves as if
- * deleted customers do not exist, without every caller having to remember
- * to filter them out.
+ * find() excludes soft-deleted rows by default, so every normal lookup
+ * (findOne(), listings, relations) treats a deleted customer as gone
+ * without each caller filtering it out.
  *
- * phone is intentionally not validated as unique here: the client brief
- * treats a duplicate phone number as a warning to surface at create time
- * (see CustomerController::actionCreate), not a hard constraint, since two
- * customers legitimately sharing a phone number is plausible (family
- * members, shared business lines).
+ * phone isn't validated as unique: the brief treats a duplicate as a
+ * warning at create time (CustomerController::actionCreate), not a hard
+ * constraint - two customers sharing a phone (family, shared business
+ * line) is plausible.
  */
 class Customer extends ActiveRecord
 {
@@ -34,11 +31,10 @@ class Customer extends ActiveRecord
     }
 
     /**
-     * The inverse of find()'s own default scope - every soft-deleted row,
-     * for CustomerController's trash/restore screens. Has to go through
-     * parent::find() directly rather than find()->andWhere(...): find()
-     * already bakes in `deleted_at IS NULL`, and andWhere() only ever adds
-     * another condition on top of what's there, never replaces one.
+     * Inverse of find()'s default scope, for the trash/restore screens.
+     * Goes through parent::find() directly, not find()->andWhere(...) -
+     * andWhere() only adds to find()'s existing `deleted_at IS NULL`,
+     * never replaces it.
      */
     public static function findTrashed(): ActiveQuery
     {
@@ -73,13 +69,10 @@ class Customer extends ActiveRecord
     }
 
     /**
-     * Inverse of Loan::getCustomer(). Added for
-     * ReportController::actionCustomers() to eager-load with
-     * ->with('loans') instead of running one Loan::find() per customer in
-     * a loop - confirmed live during a pentest review that the loop
-     * version took ~380ms against ~2,000 customers (test data left over
-     * from an unrelated import test), a real, measurable N+1 cost that
-     * scales with the customer list.
+     * Inverse of Loan::getCustomer(). Lets ReportController::
+     * actionCustomers() eager-load with ->with('loans') instead of
+     * running one Loan::find() per customer in a loop - a real N+1 cost
+     * that scales with the customer list.
      */
     public function getLoans(): ActiveQuery
     {

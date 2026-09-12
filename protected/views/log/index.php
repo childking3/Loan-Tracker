@@ -12,16 +12,11 @@ use yii\widgets\LinkPager;
 $this->title = $pageTitle;
 
 /**
- * Groups by calendar month within the page currently being rendered,
- * not across the whole table - rows are already fetched newest-first,
- * so a header row is inserted every time the month changes between one
- * row and the next. A month can end up split across two pages at the
- * pagination boundary (e.g. the last few rows of August appearing at
- * the bottom of a page whose next page starts back in August too, if
- * a month has more than one page's worth of activity) - a fully
- * correct month-aligned pager would need pagination reworked around
- * date boundaries instead of a fixed row count, which is a
- * disproportionate rewrite for what this view actually needs.
+ * Groups by month within the current page only, not the whole table -
+ * a header row is inserted whenever the month changes between rows
+ * (already fetched newest-first). A month can span two pages at the
+ * pagination boundary; a fully month-aligned pager would need pagination
+ * reworked around date boundaries, not worth it for this view.
  */
 $currentGroup = null;
 ?>

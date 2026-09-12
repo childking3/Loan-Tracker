@@ -5,14 +5,12 @@ use yii\db\Migration;
 /**
  * Creates the repayment table.
  *
- * This is an append-only ledger: rows are only ever inserted, never updated
- * or deleted, by design (no update/delete controller actions are planned
- * against this table). Accordingly there is no updated_at column, only
- * created_at.
+ * Append-only ledger: rows are only ever inserted, never updated or deleted,
+ * so there is no updated_at, only created_at.
  *
  * A loan's remaining balance is computed on read as
- * loan.total_repayment - SUM(repayment.amount) and cached per loan; every
- * insert into this table must invalidate that cache entry.
+ * total_repayment - SUM(repayment.amount) and cached per loan; every insert
+ * here must invalidate that cache entry.
  */
 class m260910_190400_create_repayment_table extends Migration
 {

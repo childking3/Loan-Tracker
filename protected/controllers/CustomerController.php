@@ -35,19 +35,11 @@ class CustomerController extends Controller
                 'class' => VerbFilter::class,
                 'actions' => [
                     'delete' => ['post'],
-                    // create/update each render a plain GET form and
-                    // process a POST submission of it - not POST-only
-                    // like delete, but still explicitly restricted
-                    // rather than left open to every HTTP verb by
-                    // default. Added during a security recheck that
-                    // looked specifically for actions relying only on
-                    // load()'s own post()-only read as their real
-                    // protection against a non-GET/POST verb, rather
-                    // than an explicit filter saying so - same
-                    // principle already applied to every POST-only
-                    // action in this app (see SiteController's own
-                    // "GET-able logout is a CSRF vector" comment),
-                    // just not yet extended to the GET+POST actions.
+                    // create/update render a GET form and process a POST
+                    // submission - not POST-only like delete, but still
+                    // explicitly restricted rather than relying on
+                    // load()'s post()-only read as the only guard against
+                    // other verbs.
                     'create' => ['get', 'post'],
                     'update' => ['get', 'post'],
                     'restore' => ['post'],
@@ -60,10 +52,8 @@ class CustomerController extends Controller
     {
         $query = Customer::find()->orderBy(['full_name' => SORT_ASC]);
 
-        // request->get() returns whatever the client sent - a query string
-        // like ?q[]=x makes this an array, and casting an array to string
-        // throws under Yii's error handler (which converts the resulting
-        // PHP warning into an exception) rather than silently coercing.
+        // A query string like ?q[]=x makes request->get() return an
+        // array; casting that to string throws under Yii's error handler.
         // Treat anything non-scalar as no search term.
         $rawSearch = Yii::$app->request->get('q', '');
         $search = trim(is_string($rawSearch) ? $rawSearch : '');
@@ -89,12 +79,9 @@ class CustomerController extends Controller
     {
         $model = $this->findModel($id);
 
-        // Was a raw SQL query against the loan table, from before the Loan
-        // ActiveRecord model existed (Phase 4 added it) - switched to the AR
-        // relation so this view could show which staff member is handling
-        // each loan (getAssignedStaff()) and its remaining balance
-        // (getRemainingBalance(), which needs a real Loan instance, not an
-        // array row) without hand-rolling either lookup a second time here.
+        // Uses the AR relation (not raw SQL) so this view can show
+        // assigned staff and remaining balance via getAssignedStaff()/
+        // getRemainingBalance(), which need a real Loan instance.
         $loans = Loan::find()
             ->with('assignedStaff')
             ->andWhere(['customer_id' => $model->id])
@@ -138,9 +125,9 @@ class CustomerController extends Controller
     {
         $model = $this->findModel($id);
         // Snapshotted before load()/save() mutate the model - AR's own
-        // getOldAttributes() can't be used here since afterSave() resets it
-        // to match the just-saved values, which would make old and new
-        // identical by the time this method could read it back.
+        // getOldAttributes() can't be used here, since afterSave() resets
+        // it to the just-saved values, making old and new identical
+        // afterward.
         $oldAttributes = $model->getAttributes();
 
         if ($model->load(Yii::$app->request->post()) && $model->save()) {
@@ -163,14 +150,10 @@ class CustomerController extends Controller
     }
 
     /**
-     * Soft-deleted customers had no way back into the app at all before
-     * this - the only path was a direct database edit, no different from
-     * User's own deliberately-permanent delete (see that model's
-     * docblock). Raised as a real gap once a customer actually needed
-     * recovering, unlike User's case where a second, permanent step is
-     * the intended safety mechanism (deactivate first, delete second) -
-     * a customer has no such two-step design, delete is just delete, so
-     * there was never a reason for it to be one-way in the first place.
+     * Unlike User's deliberately-permanent delete (a two-step safety
+     * mechanism), a customer has no such design - delete is just delete,
+     * so restoring a soft-deleted customer has no reason to require
+     * direct database access.
      */
     public function actionTrash()
     {

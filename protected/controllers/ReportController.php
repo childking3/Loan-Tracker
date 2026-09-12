@@ -42,16 +42,13 @@ class ReportController extends Controller
 
     public function actionCustomers()
     {
-        // with('loans'): one extra query for every loan across every
-        // customer (a single WHERE customer_id IN (...)), not one
-        // Loan::find() per customer in the loop - the latter was
-        // confirmed live to take ~380ms against ~2,000 customers.
+        // with('loans'): one query for all loans (WHERE customer_id IN
+        // (...)) instead of one Loan::find() per customer in a loop.
         $customers = Customer::find()->with('loans')->orderBy(['full_name' => SORT_ASC])->all();
 
-        // getRemainingBalance() per loan here was itself an N+1 - a KeyDB
-        // round trip (or, cold, a SUM query) for every loan across every
-        // customer. remainingBalancesFor() answers it for the whole report
-        // in one query instead.
+        // Avoids calling getRemainingBalance() per loan (a KeyDB round
+        // trip, or SUM query, each) - remainingBalancesFor() answers the
+        // whole report in one query instead.
         $allLoans = [];
         foreach ($customers as $customer) {
             foreach ($customer->loans as $loan) {
@@ -233,24 +230,19 @@ class ReportController extends Controller
 
     /**
      * Admins are excluded here too, matching DashboardCache's own staff
-     * performance table (both are named "staff performance" for the same
-     * reason - it tracks loan officers doing collections, not the account(s)
-     * managing them) - see DashboardCache::computeTotals() for the fuller
-     * explanation of why this is done by RBAC role rather than a user-table
-     * column.
+     * performance table - it tracks loan officers doing collections, not
+     * the accounts managing them. See DashboardCache::computeTotals() for
+     * why this is done by RBAC role rather than a user-table column.
      */
     public function actionStaff()
     {
         $adminIds = array_map('intval', Yii::$app->authManager->getUserIdsByRole(User::ROLE_ADMIN));
 
-        // Was 3 queries per staff row (2 Loan::count() + 1 Repayment::sum())
-        // in a PHP loop - confirmed live at ~30ms for 3 staff, which scales
-        // linearly with headcount for no reason, since the database can
-        // answer "active/overdue loan counts and total collected, per
-        // staff member" in one pass. Same correlated-subquery shape
-        // DashboardCache::computeTotals() already uses for its own staff
-        // performance table, extended here with an overdue_loans subquery
-        // since this report (unlike the dashboard one) shows both.
+        // Replaces 3 queries per staff row (in a PHP loop, scaling
+        // linearly with headcount) with one pass using the same
+        // correlated-subquery shape as DashboardCache::computeTotals(),
+        // extended with an overdue_loans subquery since this report shows
+        // both.
         $excludeAdmins = '';
         $params = [':active' => 'active', ':overdue' => 'overdue', ':statusActive' => User::STATUS_ACTIVE];
         if ($adminIds !== []) {
@@ -321,15 +313,11 @@ class ReportController extends Controller
     }
 
     /**
-     * Yii::$app->request->get('from', '') returns whatever the client
-     * sent - a query string like ?from[]=x makes this an array, which
-     * dateRangeQuery() cannot accept (it's typed string $from) - PHP does
-     * not coerce array to string even in weak-typing mode, so this used to
-     * be an uncaught TypeError (confirmed live: a 500, generically worded
-     * by SiteController::actionError() rather than leaking anything, but
-     * still an unnecessary crash for a malformed request). Same pattern
-     * CustomerController::actionIndex() already uses for its own ?q[]=x
-     * case - treat anything non-scalar as no filter, rather than erroring.
+     * A query string like ?from[]=x makes request->get() return an array,
+     * which dateRangeQuery()'s typed string $from can't accept - an
+     * uncaught TypeError otherwise. Same non-scalar guard
+     * CustomerController::actionIndex() uses for its own ?q[]=x case:
+     * treat it as no filter rather than erroring.
      */
     private function scalarGet(string $param): string
     {

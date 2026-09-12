@@ -12,21 +12,16 @@ use yii\db\ActiveRecord;
  * ActiveRecord for the loan table.
  *
  * principal_amount, total_repayment, daily_payment and
- * expected_completion_date are deliberately absent from rules(), so mass
- * assignment (load()) can never set them from user input - they are only
- * ever written by applyPackageTerms(), called from
- * LoanController::actionCreate with a package looked up server-side. This
- * guarantees a loan's terms always match a real, active package's figures,
- * even if a client tampered with hidden form fields to submit different
- * amounts.
+ * expected_completion_date are absent from rules() so mass assignment can
+ * never set them from user input - they're written only by
+ * applyPackageTerms(), keeping a loan's terms tied to a real package even
+ * if a client tampers with hidden form fields.
  *
- * loan_number is generated in afterSave(), from the row's own
- * auto-increment id, rather than computed before insert. A temporary
- * placeholder (unique but disposable) is written by beforeSave() to satisfy
- * the NOT NULL + UNIQUE constraint during the initial insert, then replaced
- * with the real LN-000123-style number once the id is known. This avoids a
- * race condition between two concurrent loan creations that a
- * precomputed-before-insert number could hit.
+ * loan_number is generated in afterSave() from the row's own auto-increment
+ * id, not computed before insert. beforeSave() writes a disposable unique
+ * placeholder to satisfy the NOT NULL + UNIQUE constraint during insert,
+ * avoiding a race between two concurrent loan creations that a
+ * precomputed number could hit.
  */
 class Loan extends ActiveRecord
 {
@@ -56,19 +51,10 @@ class Loan extends ActiveRecord
     }
 
     /**
-     * LoanController::staffOptions() already restricts the create form's
-     * dropdown to users holding the 'staff' role specifically ("not every
-     * active account" - see that method's own docblock) - but that alone
-     * only controls what the form *offers*, not what the model *accepts*.
-     * A manager or admin (manageLoans is manager/admin-only, so this is
-     * the actual attacker profile for this gap) could still POST an
-     * assigned_staff_id belonging to another manager or admin directly,
-     * bypassing the dropdown entirely, and the prior 'exist' rule alone
-     * would accept it - it only confirms the id belongs to *some* user,
-     * not specifically a staff-role one. Found during a security recheck
-     * that deliberately looked for exactly this shape of gap (a rule
-     * enforced only in the UI, not the model) after finding two others
-     * like it earlier the same day.
+     * The create form's dropdown (LoanController::staffOptions()) only
+     * offers staff-role users, but that alone doesn't stop a manager/admin
+     * from POSTing another manager/admin's id directly - the prior 'exist'
+     * rule only confirms the id belongs to *some* user, not a staff one.
      */
     public function validateIsStaff(string $attribute): void
     {
@@ -166,15 +152,11 @@ class Loan extends ActiveRecord
     }
 
     /**
-     * Batch equivalent of getRemainingBalance() for report/dashboard loops
-     * that already hold a full list of Loan objects and just want each
-     * one's balance - one GROUP BY query for every loan's amount paid,
-     * instead of one KeyDB round trip (or, on a cold cache, one SQL query)
-     * per loan via the per-loan cache above. Deliberately bypasses that
-     * cache rather than warming it: a report scanning the whole loan book
-     * reads every loan once and moves on, so there's nothing later in the
-     * same request to benefit from a warm per-loan key, and this always
-     * reads live data instead of possibly-stale cached figures.
+     * Batch equivalent of getRemainingBalance() for report/dashboard loops:
+     * one GROUP BY query for all loans instead of one cache/SQL round trip
+     * per loan. Deliberately bypasses the per-loan cache - a report reads
+     * each loan once, so there's nothing to gain from warming it, and this
+     * way it always reads live data.
      *
      * @param Loan[] $loans
      * @return array<int, float> balance keyed by loan id
@@ -201,11 +183,8 @@ class Loan extends ActiveRecord
     }
 
     /**
-     * Invalidate-on-write: called wherever a repayment is inserted against
-     * this loan, per the brief's caching decision. Also bumps the
-     * dashboard's polling version counter, since dashboard totals are
-     * derived from the same underlying data - see
-     * DashboardController::bumpVersion() in Phase 6.
+     * Invalidate-on-write - called wherever a repayment is recorded
+     * against this loan, so a stale cached balance isn't served next read.
      */
     public static function invalidateBalanceCache(int $loanId): void
     {

@@ -14,28 +14,18 @@ use yii\web\UploadedFile;
 
 /**
  * Admin-only staff account management: list, create, edit,
- * deactivate/reactivate, and delete. Gated on manageUsers, which - per
- * m260910_200000_init_rbac - only the admin role holds; this permission
- * existed since Phase 2 with nothing behind it until this Phase 9 pass, at
- * the user's explicit request to add it alongside the rest of Phase 9's
- * hardening work.
+ * deactivate/reactivate, delete. Gated on manageUsers (admin role only,
+ * per m260910_200000_init_rbac).
  *
- * Removing a staff member is a deliberate two-step, at the user's explicit
- * request for a safety mechanism: actionDeactivate() puts the account into
- * a temporary, fully reversible state (status -> STATUS_INACTIVE - the
- * account still exists, still shows in the staff list, and
- * actionActivate() undoes it completely). actionDelete() is the second,
- * permanent step out of that same temporary state - a soft delete
- * (User::softDelete(), setting deleted_at), never a real SQL DELETE:
- * a user row is referenced by loan.assigned_staff_id,
- * repayment.recorded_by_staff_id, customer.created_by, and
- * activity_log.user_id (all RESTRICT except activity_log's own SET NULL -
- * see m260910_190500_create_activity_log_table), so the database itself
- * would refuse a real delete on any account with real history regardless.
- * actionDelete() only accepts an already-STATUS_INACTIVE account - an
- * active staff member must be deactivated first, which is itself part of
- * the safety mechanism: there is no one-click path from "active" straight
- * to "gone".
+ * Removal is a deliberate two-step: actionDeactivate() sets status to
+ * STATUS_INACTIVE, a temporary, fully reversible state actionActivate()
+ * undoes. actionDelete() is the permanent second step - a soft delete
+ * (User::softDelete()), never a real SQL DELETE, since a user row is
+ * referenced by loan.assigned_staff_id, repayment.recorded_by_staff_id,
+ * customer.created_by, and activity_log.user_id (all RESTRICT except
+ * activity_log's own SET NULL - see m260910_190500_create_activity_log_table).
+ * actionDelete() only accepts an already-STATUS_INACTIVE account - no
+ * one-click path from active straight to gone.
  */
 class UserController extends Controller
 {
@@ -121,23 +111,15 @@ class UserController extends Controller
         }
 
         if ($model->load(Yii::$app->request->post())) {
-            // An admin editing their own account can't demote themselves
-            // out of the admin role or deactivate their own account - both
-            // would either lock them out immediately or, if they were the
-            // only admin, leave nobody able to reach this controller at
-            // all again (manageUsers is admin-only, so revoking admin from
-            // the last admin account would be irreversible without direct
-            // database access). This is a plain guard against a
-            // foreseeable operator mistake, not a response to anything
-            // found during testing.
-            // validate() first, custom checks after: Model::validate() clears
-            // any existing errors before it runs (its $clearErrors
-            // parameter defaults to true), so adding these errors before
-            // calling validate() would have them silently wiped out by that
-            // same call, leaving $valid true and the guard defeated. Caught
-            // by re-reading this method after writing it, not by testing -
-            // worth testing directly regardless before trusting it (see the
-            // Phase 9 review doc).
+            // An admin can't demote themselves out of admin or deactivate
+            // their own account - either could leave no admin able to
+            // reach this controller again (manageUsers is admin-only),
+            // recoverable only via direct database access.
+            //
+            // validate() first, custom checks after: Model::validate()
+            // clears existing errors by default, so adding these errors
+            // before calling it would get them wiped, leaving $valid true
+            // and the guard defeated.
             $isSelf = (int) $id === (int) Yii::$app->user->id;
             $valid = $model->validate();
 
@@ -145,14 +127,10 @@ class UserController extends Controller
                 $model->addError('role', 'You cannot remove your own admin role.');
                 $valid = false;
             }
-            // (int) cast, not a bare !== : $model->status at this point is
-            // whatever load() assigned from $_POST, i.e. the string "10",
-            // not the int 10 - a strict comparison against
-            // User::STATUS_ACTIVE (an int) is therefore always true
-            // regardless of what was actually submitted. Caught live: this
-            // blocked the admin from saving ANY self-edit at all, including
-            // ones that never touched status, since the guard fired every
-            // single time.
+            // (int) cast, not bare !== : $model->status here is a string
+            // from $_POST, so a strict compare against STATUS_ACTIVE (int)
+            // is always true, blocking every self-edit regardless of what
+            // was submitted.
             if ($isSelf && (int) $model->status !== User::STATUS_ACTIVE) {
                 $model->addError('status', 'You cannot deactivate your own account.');
                 $valid = false;
@@ -217,15 +195,11 @@ class UserController extends Controller
     }
 
     /**
-     * The permanent half of the two-step removal safety mechanism - see
-     * this controller's own docblock and User::softDelete() for the full
-     * reasoning. Only reachable from the temporary STATUS_INACTIVE state,
-     * enforced server-side (not just hidden in the UI) so a direct POST
-     * can't skip the deactivate step; self-delete is blocked the same way
-     * self-deactivation already is, even though in practice an admin can
-     * never reach this action against their own account anyway (they
-     * cannot deactivate themselves in the first place) - kept explicit
-     * rather than relying on that indirect guarantee.
+     * Permanent half of the two-step removal (see class docblock). Only
+     * reachable from STATUS_INACTIVE, enforced server-side so a direct
+     * POST can't skip deactivation. Self-delete is blocked explicitly
+     * too, even though self-deactivation being blocked already prevents
+     * it indirectly.
      */
     public function actionDelete($id)
     {
@@ -247,12 +221,10 @@ class UserController extends Controller
     }
 
     /**
-     * Replaces whatever role the user currently holds with exactly one new
-     * one. Safe to call unconditionally (revokeAll() on a user with no
-     * prior assignment is a no-op) - matches the same
-     * revoke-then-assign-a-single-role shape m260910_200000_init_rbac
-     * itself uses for the seeded admin user, rather than assuming a user
-     * can only ever gain roles, never change between them.
+     * Replaces whatever role the user holds with exactly one new one.
+     * Safe unconditionally - revokeAll() on a user with no prior
+     * assignment is a no-op. Same shape m260910_200000_init_rbac uses for
+     * the seeded admin user.
      */
     private function assignRole(int $userId, string $role): void
     {
@@ -265,11 +237,11 @@ class UserController extends Controller
     }
 
     /**
-     * Each user has exactly one role assigned directly (the three-tier
-     * staff/manager/admin hierarchy is expressed via addChild() parent-child
-     * relationships in the RBAC schema, not by assigning multiple roles to
-     * the same user - see m260910_200000_init_rbac), so
-     * getRolesByUser() always returns at most one entry here.
+     * Each user has exactly one role assigned directly - the
+     * staff/manager/admin hierarchy is expressed via addChild()
+     * parent-child relationships (see m260910_200000_init_rbac), not
+     * multiple role assignments - so getRolesByUser() returns at most one
+     * entry.
      */
     private function currentRole(int $userId): string
     {

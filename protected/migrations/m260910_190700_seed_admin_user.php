@@ -3,21 +3,16 @@
 use yii\db\Migration;
 
 /**
- * Seeds a single initial admin user so there is a way to log in once
- * authentication is built (a later phase).
+ * Seeds a single initial admin user so login works once auth is built.
  *
- * The password hash below was generated once, offline, with
- * password_hash($password, PASSWORD_BCRYPT, ['cost' => 13]) - the same
- * algorithm and cost yii\base\Security::generatePasswordHash() uses by
- * default - so login can verify it with Yii::$app->security->
- * validatePassword() once Phase 2 implements the login action. The
- * plaintext password is not stored in this file or anywhere in the
- * repository; it was communicated to the client once, at seed time, and
- * should be rotated after first login.
+ * password_hash was generated offline with the same algorithm/cost (bcrypt,
+ * cost 13) yii\base\Security::generatePasswordHash() uses by default, so
+ * validatePassword() can verify it once login is implemented. The plaintext
+ * password isn't stored anywhere in the repo and should be rotated after
+ * first login.
  *
- * No RBAC role is assigned to this user here: role/permission assignment is
- * wired up in Phase 2 alongside the rest of the RBAC setup, not in this
- * schema-and-seed phase.
+ * No RBAC role is assigned here - role assignment happens in the RBAC
+ * migration, not this schema/seed step.
  */
 class m260910_190700_seed_admin_user extends Migration
 {

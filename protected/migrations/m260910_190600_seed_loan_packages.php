@@ -3,19 +3,12 @@
 use yii\db\Migration;
 
 /**
- * Seeds the loan_package table with five placeholder packages.
+ * Seeds loan_package with five placeholder packages so the rest of the app
+ * (loan creation, dashboard, reports) can be built against realistic data
+ * before the client's real Excel-calculator figures are available. Every row
+ * must be replaced, not merely reviewed, before client acceptance testing.
  *
- * These figures are NOT the client's real numbers. They exist only so the
- * rest of the application (loan creation, dashboard totals, calculations)
- * can be built and exercised against realistic-looking data while the exact
- * figures from the client's Excel calculator are still pending. Every row
- * here must be replaced - not merely reviewed - before the client performs
- * acceptance testing, since the brief requires these values to match the
- * original spreadsheet exactly.
- *
- * daily_payment is total_repayment / repayment_period_days, rounded to two
- * decimal places, consistent with how the real packages are expected to be
- * defined.
+ * daily_payment = total_repayment / repayment_period_days, rounded to 2dp.
  */
 class m260910_190600_seed_loan_packages extends Migration
 {

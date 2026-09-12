@@ -39,15 +39,11 @@ class DashboardController extends Controller
     }
 
     /**
-     * Drill-down behind clicking a name in the dashboard's "Staff
-     * performance" table - same viewDashboard permission as the table
-     * itself (every staff member already sees every other staff member's
-     * active-loan count and total collected there, so a name-linked detail
-     * page carrying the same categories of data, just itemized, is not a
-     * new exposure). Admins are blocked here the same way they are
-     * excluded from that table in the first place (see
-     * DashboardCache::computeTotals()) - reachable only by guessing an id
-     * in the URL, since no link to it is ever rendered.
+     * Drill-down from the dashboard's staff performance table - same
+     * viewDashboard permission, since the table itself already shows
+     * every staff member's counts to every other. Admins are excluded
+     * here too (see DashboardCache::computeTotals()); reachable only by
+     * guessing an id, since no link to it is rendered.
      */
     public function actionStaff($id)
     {

@@ -15,11 +15,9 @@ use yii\console\ExitCode;
 class LoanController extends Controller
 {
     /**
-     * Marks every active loan past its expected completion date, with a
-     * remaining balance still owed, as overdue. Intentionally run as a
-     * scheduled command rather than computed on every page load, so
-     * dashboard counts and loan listings stay cheap to read - see the
-     * client brief's caching decisions.
+     * Marks every active loan past its expected completion date with a
+     * remaining balance as overdue. Run as a scheduled command rather than
+     * computed per page load, so dashboard/listing reads stay cheap.
      */
     public function actionMarkOverdue(): int
     {
@@ -35,10 +33,8 @@ class LoanController extends Controller
             if ($loan->getRemainingBalance() > 0.0) {
                 $loan->status = 'overdue';
                 $loan->save(false);
-                // user_id on this row will be null - AuditLogger's own
-                // Yii::$app->has('user') guard handles that automatically
-                // for the console app, which has no 'user' component at
-                // all (see console.php).
+                // user_id will be null here - AuditLogger's has('user')
+                // guard handles that for the console app (no 'user' component).
                 AuditLogger::audit('loan_status_change', 'loan', $loan->id, ['status' => 'active'], ['status' => 'overdue']);
                 $markedCount++;
             }

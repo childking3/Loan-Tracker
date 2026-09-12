@@ -39,15 +39,10 @@ class Repayment extends ActiveRecord
             ['loan_id', 'integer'],
             ['amount', 'number', 'min' => 0.01],
             ['payment_date', 'date', 'format' => 'php:Y-m-d'],
-            // Only an upper bound: a payment cannot have been collected
-            // before today. No lower bound is imposed - a staff member
-            // legitimately entering a payment a day or two late is normal
-            // and must not be blocked. Confirmed live during a pentest
-            // pass that a payment dated years in the future was otherwise
-            // accepted with no restriction beyond the date format, which
-            // would corrupt date-range reports and could let a loan look
-            // "paid off" via getRemainingBalance() before the payment it
-            // depends on has actually happened.
+            // Upper bound only, to stop a future-dated payment from
+            // corrupting date-range reports or making getRemainingBalance()
+            // show a loan as paid off early. No lower bound - a payment
+            // entered a day or two late is normal and shouldn't be blocked.
             ['payment_date', 'compare', 'compareValue' => date('Y-m-d'), 'operator' => '<=', 'message' => 'Payment date cannot be in the future.'],
             ['loan_id', 'exist', 'targetClass' => Loan::class, 'targetAttribute' => 'id'],
         ];

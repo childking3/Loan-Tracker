@@ -3,14 +3,10 @@
 use yii\db\Migration;
 
 /**
- * Creates the loan_package table.
- *
- * Holds the client's fixed set of loan packages (loan amount, total
- * repayment, daily payment, repayment period). Values must match the
- * client's original Excel calculator exactly, since the client
- * acceptance-tests calculations against that spreadsheet. Rows are seeded in
- * a later data migration once the exact figures are confirmed, and remain
- * admin-editable afterward through a settings screen (a later phase).
+ * loan_package: the client's fixed loan packages (amount, total repayment,
+ * daily payment, period). Figures must match the client's Excel calculator
+ * exactly, since acceptance testing checks calculations against it. Seeded
+ * separately once real figures are confirmed; admin-editable afterward.
  */
 class m260910_190100_create_loan_package_table extends Migration
 {

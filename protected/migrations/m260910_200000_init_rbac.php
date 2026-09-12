@@ -4,23 +4,18 @@ use app\rbac\IsAssignedStaffRule;
 use yii\db\Migration;
 
 /**
- * Creates the application's RBAC permissions, roles, and hierarchy, and
- * assigns the admin role to the admin user seeded in
- * m260910_190700_seed_admin_user.
+ * Creates RBAC permissions, roles and hierarchy, and assigns admin to the
+ * user seeded in m260910_190700_seed_admin_user.
  *
- * Roles are hierarchical: staff < manager < admin, each inheriting every
- * permission of the role below it, matching the client brief's role
- * structure.
+ * Roles are hierarchical: staff < manager < admin, each inheriting the role
+ * below, per the client brief.
  *
  * Two deliberate gaps, left open rather than guessed at:
- *  - viewDashboard is granted to staff (and therefore inherited by manager
- *    and admin) as baseline functionality every authenticated user needs;
- *    the original brief did not explicitly assign it to any role.
- *  - manageLoans is created as a permission but not assigned to any role.
- *    Who is allowed to create/edit loans (staff, manager-only, or both) is
- *    not specified in the brief and is deferred to Phase 4, when the loan
- *    module is actually built and this can be decided with real controller
- *    actions in view rather than guessed at here.
+ *  - viewDashboard is granted to staff (and inherited upward) as baseline
+ *    functionality; the brief never explicitly assigned it to a role.
+ *  - manageLoans is created but not assigned to any role - who may create
+ *    loans isn't specified in the brief, deferred until the loan module
+ *    exists and it can be decided against real controller actions.
  */
 class m260910_200000_init_rbac extends Migration
 {

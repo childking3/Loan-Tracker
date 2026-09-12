@@ -31,18 +31,14 @@ $js = <<<JS
         document.getElementById('stat-today-collections').textContent = formatCurrency(totals.todaysCollections);
     }
 
-    // Pending timer id, or null while no poll is scheduled - used by the
-    // visibilitychange listener below to know whether it needs to kick the
-    // loop back off when the tab is un-hidden.
+    // null when no poll is scheduled - lets visibilitychange below know
+    // whether it needs to restart the loop when the tab is un-hidden.
     var timer = null;
 
     function poll() {
         if (document.hidden) {
-            // Don't fetch at all while this tab isn't visible - at a 1s
-            // interval, a minimized/backgrounded dashboard would otherwise
-            // poll forever for no one to see it. The visibilitychange
-            // listener below fires an immediate catch-up poll and resumes
-            // this loop as soon as the tab is shown again.
+            // Skip fetching while hidden - a backgrounded tab shouldn't
+            // poll every second for no one to see it.
             timer = null;
             return;
         }
@@ -56,8 +52,7 @@ $js = <<<JS
                 }
             })
             .catch(function () {
-                // Network hiccup: quietly try again on the next tick rather
-                // than surfacing an error for a background refresh.
+                // Network hiccup - retry next tick, don't surface an error.
             })
             .finally(function () {
                 timer = setTimeout(poll, intervalMs);
@@ -74,14 +69,10 @@ $js = <<<JS
 })();
 JS;
 
-// Echoed directly as a plain <script nonce="..."> tag, rather than
-// registerJs(): the app's Content-Security-Policy requires every inline
-// script to carry the current request's nonce (see app\components\Csp),
-// and registerJs() has no option to add a custom attribute to the script
-// tag it generates. This also sidesteps registerJs()'s default POS_READY
-// position, which wraps the script in a jQuery-ready handler and pulls in
-// yii\web\JqueryAsset - needing a vendor/bower/jquery directory that does
-// not exist in this Composer-free setup.
+// Echoed as a plain <script nonce="..."> tag rather than registerJs():
+// the CSP requires a nonce on every inline script, which registerJs() has
+// no option to add, and its default POS_READY wraps output in a
+// jQuery-ready handler this Composer-free setup doesn't have.
 $scriptTag = Html::script($js, ['nonce' => \Yii::$app->csp->getNonce()]);
 ?>
 <h1>Dashboard</h1>

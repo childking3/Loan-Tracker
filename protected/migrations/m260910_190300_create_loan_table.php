@@ -6,14 +6,14 @@ use yii\db\Migration;
  * Creates the loan table.
  *
  * principal_amount, total_repayment and daily_payment are copied from the
- * selected loan_package at creation time rather than joined on read, so a
- * later admin edit to a package's figures does not retroactively change the
- * terms of loans already issued under the old figures.
+ * selected loan_package at creation time, not joined on read, so a later
+ * edit to a package's figures doesn't retroactively change already-issued
+ * loans.
  *
- * status is a native MySQL ENUM rather than a lookup table: the value set is
- * small, fixed, and not user-editable. overdue is set by a scheduled console
- * command (a later phase), not computed on every page load, so dashboard
- * queries can filter on this column directly and cheaply.
+ * status is a native MySQL ENUM, not a lookup table, since the value set is
+ * small, fixed and not user-editable. overdue is set by a scheduled console
+ * command, not computed per page load, so it stays a cheap, directly
+ * filterable column.
  */
 class m260910_190300_create_loan_table extends Migration
 {

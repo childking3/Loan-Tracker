@@ -7,17 +7,11 @@ use yii\helpers\Html;
 use yii\helpers\Url;
 
 /**
- * Highlights the nav link for whichever controller is currently active, so
- * the header actually shows where you are - it never did before this pass
- * (every link looked the same regardless of the page you were on).
- * Compares against the controller id only by default (not the action),
- * since most of these links point at one controller's index action and
- * every other action within it (view/create/update/etc.) should still
- * count as "on this section" - e.g. loan/view should still highlight
- * "Loans". LogController is the one exception: it serves two distinct nav
- * items (Audit log, Access log) from the same controller, so those two
- * pass $exact=true to compare the full controller/action instead -
- * without it, viewing either page would highlight both links at once.
+ * Highlights the active nav link. Compares controller id only by default,
+ * so any action within a controller (view/create/update) still counts as
+ * "on this section". LogController is the exception - it serves two nav
+ * items (Audit log, Access log), so those pass $exact=true to compare the
+ * full controller/action, or viewing either would highlight both.
  */
 $currentController = \Yii::$app->controller->id;
 $currentAction = \Yii::$app->controller->action->id ?? '';
@@ -37,9 +31,8 @@ $themeInitJs = <<<'JS'
             document.documentElement.setAttribute('data-theme', 'dark');
         }
     } catch (e) {
-        // localStorage can throw in a locked-down/private browser context -
-        // fall back to the light theme (the :root default) rather than
-        // breaking page load over a cosmetic preference.
+        // localStorage can throw in a locked-down/private context - fall
+        // back to the light theme rather than break page load over this.
     }
 })();
 JS;
@@ -77,16 +70,10 @@ $themeToggleJs = <<<'JS'
 JS;
 
 /**
- * Below the existing 640px breakpoint the nav links, the user chip, the
- * logout form and the theme toggle are all hidden by default (see the
- * matching CSS) and only shown once this button is pressed - the same
- * content as the desktop header, just collapsed behind one control
- * instead of wrapping onto several visible rows at once. Toggles a
- * single class on <header> rather than each hidden element separately,
- * so the CSS is the only place that decides what "open" looks like.
- * Above 640px this button is hidden by CSS and never wired to anything
- * relevant - the class it would toggle has no effect there, since none
- * of the elements it shows/hides are hidden at that width to begin with.
+ * Below 640px the nav/user chip/logout/theme toggle are hidden by CSS
+ * until this button opens them. Toggles one class on <header> instead of
+ * each element, so CSS alone decides what "open" looks like. Above 640px
+ * the button is hidden and the class has no visible effect.
  */
 $navToggleJs = <<<'JS'
 (function () {

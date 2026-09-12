@@ -44,12 +44,9 @@ class RepaymentController extends Controller
 
     /**
      * Staff may only record repayments on loans assigned to them; manager
-     * and admin (viewAllLoans) may record against any loan. This exercises
-     * the same IsAssignedStaffRule the loan module uses, applied here to
-     * the manageRepayments permission's context rather than a bare role
-     * check, since the brief describes staff's whole permission set -
-     * viewAssignedLoans, manageRepayments, manageCustomers - as scoped to
-     * their own assigned loans.
+     * and admin (viewAllLoans) may record against any loan - exercises
+     * the same IsAssignedStaffRule the loan module uses, since the brief
+     * scopes staff's whole permission set to their own assigned loans.
      */
     public function actionCreate($loanId)
     {
@@ -62,19 +59,11 @@ class RepaymentController extends Controller
             throw new ForbiddenHttpException('You are not allowed to record repayments on this loan.');
         }
 
-        // 'overdue' included alongside 'active' - found live during a
-        // business-logic recheck that this used to be 'active' only,
-        // which meant an overdue loan could never receive another
-        // repayment through this app at all (the view also hid the
-        // whole form for one - see loan/view.php's own matching
-        // condition), and nothing anywhere else ever moves a loan back
-        // out of 'overdue' - it was a permanent dead end with no way to
-        // ever pay one off or reach 'completed' again. The pay-off
-        // logic below (`$remaining <= 0.0` -> 'completed') already
-        // doesn't care what the loan's status was beforehand, so
-        // widening this one check is sufficient on its own - a fully
-        // repaid overdue loan already correctly becomes 'completed'
-        // with no further changes needed.
+        // 'overdue' included alongside 'active': without it, an overdue
+        // loan could never receive another repayment (nothing else ever
+        // moves a loan back out of 'overdue'), a permanent dead end. The
+        // pay-off logic below doesn't care what the prior status was, so
+        // widening this check is sufficient on its own.
         if (!in_array($loan->status, ['active', 'overdue'], true)) {
             Yii::$app->session->setFlash('error', 'Repayments can only be recorded on active or overdue loans.');
             return $this->redirect(['loan/view', 'id' => $loan->id]);
@@ -89,44 +78,28 @@ class RepaymentController extends Controller
             $model->loan_id = $loan->id;
             $model->recorded_by_staff_id = Yii::$app->user->id;
 
-            // A payment cannot have been collected before the loan itself
-            // existed. Confirmed live during a pentest pass: a payment
-            // dated 1900-01-01 against a loan that started in 2026 was
-            // accepted with no restriction - the existing future-date
-            // rule on Repayment::rules() only bounds the upper side. An
-            // impossible historical date would show up as a phantom
-            // collection in any date-range report and could make
-            // getRemainingBalance() look partially paid before the loan
-            // was ever issued. Checked here against the controller's own
-            // route-resolved $loan rather than as a new Repayment model
-            // rule that re-derives the loan from $this->loan_id - that
-            // attribute is still mass-assignable at the moment validate()
-            // runs (reset to the correct value only on the line above,
-            // after load()+validate() already executed), so a rule
-            // depending on $this->loan could be tricked into validating
-            // against a different, attacker-chosen loan than the one this
-            // request is actually scoped to and ultimately saves against.
+            // A payment can't predate the loan itself - Repayment::rules()'s
+            // future-date rule only bounds the upper side, so this was
+            // previously unrestricted, letting a phantom collection skew
+            // date-range reports and getRemainingBalance(). Checked
+            // against the controller's own route-resolved $loan rather
+            // than a model rule re-deriving it from $this->loan_id, since
+            // that attribute is still mass-assignable at validate() time
+            // and could be tricked into checking a different,
+            // attacker-chosen loan.
             if ($model->payment_date < $loan->start_date) {
                 Yii::$app->session->setFlash('error', "Payment date cannot be before this loan's start date ({$loan->start_date}).");
                 return $this->redirect(['loan/view', 'id' => $loan->id]);
             }
 
-            // Repayments are append-only with no client-side idempotency
-            // key, so a double-click or a network retry resubmitting the
-            // same form is indistinguishable from two real payments at the
-            // database layer - confirmed live during a pentest pass: 10
-            // concurrent identical submissions recorded 10 separate rows.
-            // Guarded here with a row lock on the loan (SELECT ... FOR
-            // UPDATE inside a transaction) so concurrent requests against
-            // the same loan serialize rather than all reading "no duplicate
-            // yet" before any of them commits, plus a check for another
-            // repayment with the same loan/amount/date/staff recorded in
-            // the last few seconds. This is deliberately a short window,
-            // not a permanent one: a staff member legitimately recording
-            // two separate same-amount payments on the same day (e.g. two
-            // installments) is expected and must not be permanently
-            // blocked - only a near-simultaneous accidental resubmission
-            // is.
+            // Repayments are append-only with no idempotency key, so a
+            // double-click or retry is indistinguishable from two real
+            // payments. Guarded with a row lock on the loan (SELECT ...
+            // FOR UPDATE) so concurrent requests serialize, plus a check
+            // for a matching loan/amount/date/staff repayment in the last
+            // few seconds - a short window, not permanent, since two
+            // genuine same-day payments (e.g. installments) must not be
+            // blocked.
             $duplicate = false;
             $transaction = Yii::$app->db->beginTransaction();
             try {

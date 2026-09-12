@@ -5,15 +5,13 @@ use yii\db\Migration;
 /**
  * Creates the customer table.
  *
- * phone is indexed but not unique-constrained: duplicate-phone detection is
- * handled at the application layer (Phase 3 customer controller), not
- * enforced as a hard database constraint, since two customers sharing a
- * phone number is a warning case rather than a data-integrity violation.
+ * phone is indexed but not unique: duplicate detection is handled at the
+ * application layer, not as a hard DB constraint, since two customers
+ * sharing a phone is a warning case, not a data-integrity violation.
  *
- * deleted_at implements soft delete (a stored unix timestamp, null when not
- * deleted) so customer records can be withheld from normal views without
- * losing loan/repayment history tied to them, and to support NDPR deletion
- * requests without breaking referential integrity.
+ * deleted_at is a nullable soft-delete timestamp, so records can be hidden
+ * without losing loan/repayment history, and to support deletion requests
+ * without breaking referential integrity.
  */
 class m260910_190200_create_customer_table extends Migration
 {

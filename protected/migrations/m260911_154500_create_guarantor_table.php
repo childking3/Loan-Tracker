@@ -5,34 +5,20 @@ use yii\db\Migration;
 /**
  * Creates the guarantor table.
  *
- * A loan can have zero or more guarantors (hasMany, not a single fixed
- * slot) - some small lending shops require two, some require none for a
- * small enough loan, and this app has no stated policy either way. Making
- * whether a guarantor is required at all a hard validation rule would be
- * a business-policy decision this migration has no basis to make; left
- * fully optional at the schema/model level, same as this app already
- * leaves repayment amount ceilings and guarantor requirements
- * undecided elsewhere (see CODEBASE.md's open items).
+ * A loan can have zero or more guarantors (hasMany): guarantor policy varies
+ * by loan and this app has no stated requirement either way, so it's left
+ * optional at the schema/model level rather than enforced (see CODEBASE.md's
+ * open items).
  *
- * Deliberately one row per loan, not a customer-like standalone entity
- * reused across loans via a join table: this mirrors how a paper loan
- * application collects guarantor details fresh each time, even if the
- * same real person guarantees more than one loan for the same
- * lender - two separate rows, not one shared record. Simpler than a
- * many-to-many design, and matches how this app already treats
- * per-loan data it doesn't need to deduplicate.
+ * One row per loan, not a shared customer-like entity via a join table:
+ * mirrors a paper application collecting guarantor details fresh each time,
+ * even if the same person guarantees multiple loans.
  *
- * phone is indexed but not unique, matching customer.phone's own
- * reasoning (m260910_190200_create_customer_table) - two guarantors, or
- * the same guarantor across two loans, sharing a phone number is
- * expected, not a data-integrity violation.
+ * phone is indexed but not unique, matching customer.phone - a shared phone
+ * across guarantors/loans is expected, not a data-integrity violation.
  *
- * ON DELETE RESTRICT on both foreign keys, matching every other
- * financial-record table in this app (loan, repayment) - a guarantor
- * row must never silently disappear because its loan or the staff who
- * recorded it was removed; nothing in this app hard-deletes loans or
- * users today, but the constraint exists so that stays true even if a
- * future change tries to.
+ * ON DELETE RESTRICT on both FKs, matching loan/repayment: a guarantor row
+ * must never disappear because its loan or the recording staff was removed.
  */
 class m260911_154500_create_guarantor_table extends Migration
 {

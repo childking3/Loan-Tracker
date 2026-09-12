@@ -12,37 +12,21 @@ use yii\web\IdentityInterface;
 use yii\web\UploadedFile;
 
 /**
- * Identity model backing authentication.
+ * Identity model backing authentication (IdentityInterface).
  *
- * Maps to the user table created in Phase 1. Implements IdentityInterface so
- * the web application's user component can authenticate against it.
+ * Session-based login only, no API tokens - findIdentityByAccessToken()
+ * throws rather than returning null, to fail loudly if ever called.
  *
- * Access-token based authentication is not implemented: this application
- * uses session-based login only, not API tokens, so
- * findIdentityByAccessToken() deliberately throws rather than returning
- * null, to fail loudly if something attempts to use it.
- *
- * rules(), $password, $role, setPassword() and generateAuthKey() were all
- * added in Phase 9 for UserController - this model had none of them before,
- * since every account until now was created directly by a migration
- * (m260910_190700_seed_admin_user, m260910_220000_seed_dummy_data), never
- * through a web form. Both of those migrations set created_at/updated_at by
- * hand for exactly that reason - this model had no TimestampBehavior to do
- * it for them; UserController needs that automatic, so it's added here now,
- * matching Customer's and Loan's own behaviors().
- *
- * The validation rule shape (trim, required, unique, length, a format
- * check) is adapted from HumHub's own user model
+ * Validation rule shape (trim, required, unique, length, format check) is
+ * adapted from HumHub's own user model
  * (protected/humhub/modules/user/models/User.php, Copyright HumHub GmbH &
  * Co. KG, https://www.humhub.com/licences - see CODEBASE.md's "Borrowed
- * from HumHub" section) - not copied, since HumHub's version pulls its
- * username length/regex from a configurable module setting this app has no
- * equivalent of, and validates several fields (guid, timezone, visibility,
- * language) this app's much smaller user table doesn't have at all. The
- * two-state status model (active/inactive) is also deliberately kept
- * instead of adopting HumHub's richer multi-state one (pending approval,
- * disabled-by-admin, etc.) - disproportionate for what is, for this
- * client, a handful of staff accounts managed directly by one admin.
+ * from HumHub" section), not copied: HumHub pulls its username rules from
+ * a configurable module setting this app doesn't have, and validates
+ * fields (guid, timezone, visibility, language) this table lacks. The
+ * two-state status model (active/inactive) is kept instead of HumHub's
+ * richer multi-state one - disproportionate for a handful of staff
+ * accounts managed by one admin.
  */
 class User extends ActiveRecord implements IdentityInterface
 {
@@ -57,41 +41,33 @@ class User extends ActiveRecord implements IdentityInterface
     public const SCENARIO_CREATE = 'create';
 
     /**
-     * No longer shared with SiteController::actionLogin()'s access-log
-     * redaction decision - it used to be, but a shape-only check let a
-     * secret/token happening to match this exact pattern (letters, digits,
-     * underscores) through into the log verbatim; that method now checks
-     * against real existing usernames instead. See its own docblock for
-     * the full history.
+     * No longer shared with SiteController::actionLogin()'s log-redaction
+     * check - a shape-only match let a secret/token happen to pass this
+     * same pattern through into the log; that method now checks against
+     * real usernames instead.
      */
     public const USERNAME_PATTERN = '/^[A-Za-z0-9_.]{1,64}$/';
 
     /**
-     * Plain-text password - write-only, never persisted directly (see
-     * setPassword(), which hashes it into password_hash). Required only on
-     * SCENARIO_CREATE; left blank on an update means "keep the current
-     * password", handled by UserController checking for a non-empty value
-     * before calling setPassword() again.
+     * Write-only, never persisted directly - setPassword() hashes it into
+     * password_hash. Required only on SCENARIO_CREATE; blank on update
+     * means "keep current password" (UserController checks for a
+     * non-empty value before calling setPassword() again).
      */
     public ?string $password = null;
 
     /**
-     * RBAC role - virtual, not a column (role assignment lives in the
-     * framework's own auth_assignment table via Yii::$app->authManager, not
-     * on this row). Modeled as a property here anyway so it validates and
-     * displays through the same load()/Html::activeDropDownList() flow as
-     * every other field, rather than being handled as a raw, unvalidated
-     * $_POST read in the controller.
+     * RBAC role - virtual, not a column (assignment lives in
+     * auth_assignment via Yii::$app->authManager). Modeled as a property
+     * so it validates and renders through the normal load()/dropdown flow
+     * instead of a raw, unvalidated $_POST read.
      */
     public ?string $role = null;
 
     /**
-     * Write-only, never persisted directly - saveAvatar() below validates
-     * and stores it via AvatarStorage, writing only the resulting random
-     * filename to avatar_filename. Optional on every scenario (both
-     * create and update leave a picture unset by default), matching
-     * $password's own "blank means no change" precedent rather than
-     * requiring a picture up front.
+     * Write-only - saveAvatar() stores it via AvatarStorage and writes
+     * only the resulting filename to avatar_filename. Optional on every
+     * scenario, matching $password's "blank means no change" precedent.
      */
     public ?UploadedFile $avatarFile = null;
 
@@ -101,12 +77,9 @@ class User extends ActiveRecord implements IdentityInterface
     }
 
     /**
-     * Excludes soft-deleted rows by default, matching Customer::find()'s
-     * exact pattern (Phase 3) - every normal lookup (findIdentity(),
-     * findByUsername(), UserController's staff list, the uniqueness
-     * validators on username/email) automatically treats a deleted
-     * account as gone, including freeing up its username/email for reuse,
-     * without every caller needing to remember to filter it out.
+     * Excludes soft-deleted rows by default, matching Customer::find() -
+     * every lookup (findIdentity, findByUsername, uniqueness validators)
+     * treats a deleted account as gone and frees its username/email.
      */
     public static function find(): ActiveQuery
     {
@@ -133,12 +106,9 @@ class User extends ActiveRecord implements IdentityInterface
             ['email', 'string', 'max' => 255],
             ['full_name', 'string', 'max' => 255],
             ['status', 'in', 'range' => [self::STATUS_ACTIVE, self::STATUS_INACTIVE]],
-            // No password policy existed anywhere in this app before this
-            // form - every prior account was seeded with a pre-hashed
-            // value. 8 characters is a plain, unremarkable minimum, not a
-            // figure from the client brief (which never specifies one) -
-            // flagged in the Phase 9 review doc as a judgment call worth
-            // confirming, not silently treated as settled.
+            // 8 characters is an arbitrary minimum, not from the client
+            // brief (which specifies none) - flagged as a judgment call
+            // worth confirming, not settled policy.
             ['password', 'required', 'on' => self::SCENARIO_CREATE],
             ['password', 'string', 'min' => 8],
             ['role', 'required'],
@@ -211,14 +181,10 @@ class User extends ActiveRecord implements IdentityInterface
     }
 
     /**
-     * Stores $file via AvatarStorage under a fresh random filename, points
-     * this row at it, then removes whatever file it previously pointed to.
-     * Deliberately in that order: if saving the new file or the DB update
-     * fails, the old file is left alone rather than the account ending up
-     * with no avatar file at all. The caller must still call save() itself
-     * to persist avatar_filename beyond this call if it hasn't validated
-     * the whole model yet - this method persists only that one attribute,
-     * the same narrow-column-save shape softDelete() above already uses.
+     * Stores $file via AvatarStorage, points this row at it, then removes
+     * the old file - in that order, so a failure leaves the old avatar
+     * intact rather than the account ending up with none. Persists only
+     * avatar_filename; same narrow-column-save shape as softDelete().
      */
     public function saveAvatar(UploadedFile $file): void
     {
@@ -229,37 +195,17 @@ class User extends ActiveRecord implements IdentityInterface
     }
 
     /**
-     * The second, permanent step of the two-step staff-removal safety
-     * mechanism: deactivation (status -> STATUS_INACTIVE, via
-     * UserController::actionDeactivate) is the reversible "temporary
-     * state" - the account still exists and shows in the staff list with
-     * a Reactivate option. This is the other exit from that state, and it
-     * is one-way, matching Customer::softDelete()'s own precedent (which
-     * likewise has no restore action anywhere in the app): once
-     * deleted_at is set, find()'s override hides the row everywhere in
-     * the application, including login (on top of the STATUS_INACTIVE
-     * check already in place) and the username/email uniqueness checks.
-     * The row itself is never actually removed from the database - see
-     * this column's own migration for why a real SQL DELETE isn't
-     * possible here regardless (loan/repayment/customer foreign keys).
-     */
-    /**
-     * Caught live during testing, not anticipated in advance: username and
-     * email both have real, unique indexes at the database level
-     * (idx-user-username, idx-user-email - m260910_190000_create_user_table),
-     * which know nothing about deleted_at. find()'s override only hides a
-     * soft-deleted row from *application*-level uniqueness checks (the
-     * UniqueValidator in rules(), and login), so a new account reusing a
-     * deleted one's exact username/email still hit a real duplicate-key
-     * database error on save() - confirmed directly: creating a fresh user
-     * with a just-deleted username threw
-     * `SQLSTATE[23000]: ... Duplicate entry ... for key 'idx-user-username'`,
-     * not a clean validation message. Renaming both to a disambiguated,
-     * clearly-marked value here (rather than leaving them as-is) satisfies
-     * the real database constraint while genuinely freeing the original
-     * values for reuse. full_name is left untouched, so a deleted account's
-     * historical activity_log entries still show a real human name, just
-     * under a marked username.
+     * Permanent second step after deactivation (status -> STATUS_INACTIVE),
+     * which is reversible via UserController::actionDeactivate's Reactivate
+     * option - this step is one-way, matching Customer::softDelete().
+     *
+     * username/email carry real unique DB indexes that don't know about
+     * deleted_at, so find()'s override alone isn't enough: reusing a
+     * just-deleted username/email would hit a raw duplicate-key SQL error
+     * instead of a validation message. Rewriting both to a marked value
+     * here satisfies the DB constraint and frees the originals for reuse;
+     * full_name stays untouched so old activity_log entries keep a real
+     * name.
      */
     private const DELETED_MARKER = '_deleted_';
 

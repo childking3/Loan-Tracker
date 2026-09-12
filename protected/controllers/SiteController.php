@@ -69,42 +69,18 @@ class SiteController extends Controller
                 return $this->goBack();
             }
 
-            // Logged even when the username doesn't exist or the account is
-            // locked out - the point of an access log is to show every
-            // attempt, not just ones against a real account (see the
-            // AuditLogger docblock).
+            // Logged even for a nonexistent username or locked account - an
+            // access log should show every attempt, not just real ones
+            // (see AuditLogger).
             //
-            // The raw submitted value is only logged verbatim if it belongs
-            // to a real, existing account. Originally (Phase 9) this
-            // checked the value against USERNAME_PATTERN instead - closing
-            // the case of someone fat-fingering their password into the
-            // username field, since a password virtually never matches
-            // that pattern (letters/digits/dots/underscores only). Found
-            // during a later pentest pass, via a manual test submitting
-            // "sk_live_51H8xYzABC123SECRET" (an API-key-shaped string) as
-            // the username: it matched USERNAME_PATTERN - real secrets and
-            // tokens are very often exactly this shape (alphanumeric plus
-            // underscores) - and was stored in activity_log verbatim
-            // regardless. A shape-based check can never fully close this:
-            // any character-class a real username is allowed to use is
-            // also a character-class a real secret could happen to use.
-            // Checking against actual existing usernames instead closes it
-            // completely - nothing that isn't one of this app's real
-            // account names is ever logged verbatim, whatever it looks
-            // like.
-            //
-            // Trade-off, deliberately accepted: an enumeration sweep
-            // against usernames that don't exist here (root, admin, test,
-            // ...) now shows up as a redacted placeholder too, not the
-            // literal string guessed - only a hit against a real account
-            // name is logged in full. Confirmed live: guessing the
-            // nonexistent "root" is now redacted exactly like a secret
-            // would be. The count/timing/length of failed attempts is
-            // still fully visible either way (that's what the lockout
-            // throttle and this log's other columns are for) - only the
-            // literal guessed string, for guesses that don't land, is what
-            // this trades away, in exchange for a guarantee that nothing
-            // resembling a real secret can ever reach this log verbatim.
+            // The raw value is only logged verbatim if it matches a real,
+            // existing account. A shape-based check (e.g. a username
+            // regex) can't reliably tell a fat-fingered password from a
+            // real secret/API key, since both use the same character
+            // classes - checking against actual usernames closes that gap
+            // completely, at the cost of also redacting guesses against
+            // nonexistent usernames (root, admin, ...). Attempt
+            // count/timing/length stays fully visible either way.
             $submittedUsername = (string) $model->username;
             $loggedUsername = User::findByUsername($submittedUsername) !== null
                 ? $submittedUsername
@@ -117,28 +93,25 @@ class SiteController extends Controller
     }
 
     /**
-     * Yii::$app->user->logout() destroys the PHP session server-side by
-     * default (not merely the client-side identity cookie), satisfying the
-     * client brief's requirement that logout actually invalidate the
-     * session rather than just forgetting the identity on the client.
+     * logout() destroys the session server-side, not just the client
+     * identity cookie - satisfies the brief's requirement that logout
+     * actually invalidates the session.
      */
     public function actionLogout()
     {
-        // Logged before logout(), not after: logout() destroys the session
-        // and clears the identity, so Yii::$app->user->id (which
-        // AuditLogger reads to attribute the row) would already be gone.
+        // Logged before logout(): afterward the session/identity is gone,
+        // so AuditLogger would have no Yii::$app->user->id to attribute
+        // the row to.
         AuditLogger::access('logout');
         Yii::$app->user->logout();
         return $this->goHome();
     }
 
     /**
-     * Self-service "My account" page - view your own picture, upload a
-     * new one. No self-service page of any kind existed before this
-     * feature (UserController's create/update forms are admin-only, for
-     * managing *other* staff), so this is a new, deliberately narrow
-     * surface: just the avatar, not username/email/password self-editing,
-     * since that's all this feature actually asked for.
+     * Self-service "My account" page - view/upload your own avatar only.
+     * Deliberately narrow: no username/email/password self-editing (those
+     * stay admin-only via UserController), since avatar is all this
+     * feature asked for.
      */
     public function actionProfile()
     {
@@ -163,30 +136,19 @@ class SiteController extends Controller
     {
         $exception = Yii::$app->errorHandler->exception;
         if ($exception === null) {
-            // No error handler ever forwarded here - this route is being
-            // hit directly rather than reached via an actual exception,
-            // confirmed live during a regression pass (it 500'd trying to
-            // call getMessage() on null). Nothing to show; treat it the
-            // same as any other route with no matching resource.
+            // No exception was forwarded here - route hit directly rather
+            // than via the error handler. Nothing to show; treat as any
+            // unmatched route.
             throw new \yii\web\NotFoundHttpException('Page not found.');
         }
 
-        // Found during the Phase 9 hardening pass, comparing this
-        // hand-rolled action against yii\web\ErrorAction (the stock action
-        // this project deliberately didn't use, to control the view
-        // exactly): getMessage() was rendered unconditionally for every
-        // exception. yii\web\HttpException/UserException messages
-        // (Page not found., Customer not found., the CSRF failure message,
-        // etc.) are written to be user-facing and are safe to show as-is.
-        // Anything else is an unexpected bug - a DB error, a PHP TypeError,
-        // an unguarded null - and its message can contain internal detail
-        // (file paths, SQL fragments, class names) that has no business
-        // reaching whoever triggered it, deliberately or not. YII_DEBUG is
-        // false in this app (never defined, so Yii's own default), which
-        // only controls the framework's own debug view - it does nothing
-        // to gate this custom action, so the generic-message fallback
-        // below has to do that job explicitly, exactly as
-        // yii\web\ErrorAction::getExceptionMessage() does.
+        // UserException messages (Page not found., CSRF failure, etc.) are
+        // written to be user-facing and safe to show as-is. Anything else
+        // is an unexpected bug whose message can leak internal detail
+        // (file paths, SQL, class names). YII_DEBUG only gates Yii's own
+        // debug view, not this custom action, so the generic fallback
+        // below has to do that job explicitly - same as
+        // yii\web\ErrorAction::getExceptionMessage().
         $message = $exception instanceof \yii\base\UserException
             ? $exception->getMessage()
             : 'An internal server error occurred.';

@@ -3,14 +3,11 @@
 use yii\db\Migration;
 
 /**
- * avatar_filename stores only the stored filename (a random token plus
- * extension, generated server-side - see AvatarUploader), never the
- * original uploaded name, so this column can never be used to reconstruct
- * a path or reintroduce path-traversal/enumeration concerns. The actual
- * file lives outside the public docroot, in protected/uploads/avatars/
- * (denied by the vhost like the rest of protected/, matching
- * runtime/cache's own www-data ACL pattern rather than static/'s
- * directly-public one - see AvatarController for how it's served instead).
+ * avatar_filename stores only a server-generated random token + extension
+ * (see AvatarUploader), never the original filename, so it can't be used
+ * for path-traversal or enumeration. The file itself lives outside the
+ * public docroot in protected/uploads/avatars/ (denied by the vhost, like
+ * runtime/cache's ACL) and is served via AvatarController.
  */
 class m260912_010000_add_avatar_to_user extends Migration
 {
