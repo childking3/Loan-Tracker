@@ -4,10 +4,12 @@
 /** @var array $header */
 /** @var array $rows */
 /** @var string $exportUrl */
+/** @var \yii\data\ActiveDataProvider|null $dataProvider set only on reports whose row count scales with business volume (customers, loans, repayments); the CSV export always covers every filtered row regardless. */
 
 use yii\helpers\Html;
+use yii\widgets\LinkPager;
 ?>
-<p><?= Html::a('Export CSV', $exportUrl) ?></p>
+<p><?= Html::a('Export CSV (all matching rows)', $exportUrl) ?></p>
 <div class="table-scroll">
 <table>
     <thead>
@@ -28,3 +30,6 @@ use yii\helpers\Html;
     </tbody>
 </table>
 </div>
+<?php if (isset($dataProvider)): ?>
+    <?= LinkPager::widget(['pagination' => $dataProvider->getPagination()]) ?>
+<?php endif; ?>

@@ -5396,3 +5396,105 @@ left in place rather than forced - contain no file and no data, and
 HumHub's own `StorageManager` never prunes empty shard buckets either,
 so an empty leftover directory here matches the upstream behavior this
 scheme was adapted from, not a gap to close.
+
+## Database-interaction optimization pass - 2026-09-12, same day, requested explicitly ("take your time, don't reinvent the wheel")
+
+Proactive pass, not a response to an observed slowdown - dev DB is tiny
+(17 loans, 9 repayments, 124 log rows at the time of this pass) and
+nothing was actually measured as slow. The request was specifically
+about the "we don't know how many staff would end up being there"
+scalability concern from the avatar-sharding decision above, extended to
+every DB-facing code path. Audited every `::find()` call site and every
+`foreach` in controllers/views for N+1 shapes first; most of the obvious
+ones were already handled (`with()` eager-loading throughout,
+`Loan::remainingBalancesFor()` batching the per-loan balance calc into
+one `GROUP BY` instead of N cache/SQL round trips, `DashboardCache`/
+`ReportController::actionStaff()` using correlated subqueries instead of
+a PHP-side loop per staff member) - three real gaps were found and fixed.
+
+**Composite indexes** (`m260912_020000_add_composite_query_indexes.php`):
+replaced four single-column indexes with composites matching how they're
+actually queried, rather than adding composites on top and paying write
+cost twice - a composite still serves an equality lookup on its leftmost
+column alone, so no existing query loses index coverage:
+- `loan(assigned_staff_id, status)` - the correlated subqueries in
+  `DashboardCache::computeTotals()` and `ReportController::actionStaff()`
+  filter on exactly this pair; previously an index lookup on one column
+  plus a row-by-row filter over every match.
+- `loan(status, created_at)` - `ReportController::actionLoans()`'s
+  filter-then-sort query.
+- `loan(customer_id, created_at)` - `CustomerController::actionView()`'s
+  per-customer loan history, same filter+sort shape.
+- `activity_log(category, id)` - `LogController`'s per-category,
+  paginated, id-DESC log views; category alone finds the rows but id
+  ordering still needed a filesort once the table grows.
+Verified via `EXPLAIN`: at the current tiny row counts MariaDB's
+optimizer chooses a full scan over some of these anyway (correctly - a
+full scan really is cheaper below a few dozen rows), so two of the four
+were confirmed working via `FORCE INDEX` instead of a plain `EXPLAIN`,
+showing the composite eliminates the filesort/full-scan once the
+optimizer does pick it up at real data volumes.
+
+**`UserController::actionIndex()`'s per-row RBAC lookup**: called
+`Yii::$app->authManager->getRolesByUser($userId)` once per user in a PHP
+loop to build the role column - one `auth_assignment` query per row,
+scaling linearly with headcount. Replaced with `currentRoles()`, one
+batched `SELECT user_id, item_name FROM auth_assignment WHERE user_id IN
+(...)` for the whole page. Checked HumHub first per the standing
+instruction - deliberately not borrowed from it: HumHub's own membership
+model doesn't map onto Yii's RBAC `auth_assignment` table, so this is a
+plain SQL-batching fix, not a borrowed pattern. Verified live: role
+column for all four seeded accounts (admin/manager/staff/staff) matched
+before and after the change.
+
+**Unbounded report queries** (`ReportController`): `customers`, `loans`,
+`repayments`, `outstanding`, and `overdue` all pulled their entire
+filtered result set via `->all()` with no `LIMIT`, then rendered every
+row as one HTML table and (via the same `$rows` array) the same rows as
+CSV - the concrete scalability bottleneck already flagged earlier this
+session as unaddressed. `daily-collections` (bounded by calendar days in
+the filtered range) and `staff` (bounded by headcount) were left as they
+were - pagination there is complexity with no real payoff at any
+plausible scale for this business.
+
+Checked HumHub's own large-listing pattern before design
+(`humhub-1.18.5/protected/humhub/modules/stream/models/StreamQuery.php`)
+and deliberately didn't borrow it: HumHub's activity stream uses
+cursor/keyset pagination suited to infinite-scroll, but these are
+numbered-page business reports with a CSV export that must return the
+same filtered rows as the HTML view - a different problem shape.
+
+Fix: HTML render now uses a real `ActiveDataProvider` (`pageSize` 50,
+matching `LogController`'s existing convention) with a `LinkPager` added
+to `views/report/_table.php`; CSV export re-reads the same filtered query
+directly and unbounded, via `ActiveQuery::batch(500)` (Yii's own
+streaming-batch iterator, not a hand-rolled `LIMIT`/`OFFSET` loop) wrapped
+in a PHP generator, so a CSV export's memory use stays flat (~500 rows'
+worth) regardless of how many total rows match the filter. Row-building
+logic (e.g. `loanRow()`) is a single shared method the paginated-HTML
+path and the batched-CSV path both call, so the two outputs can't drift
+apart from each other even though they no longer share one `$rows` array
+the way the old code did.
+
+One correctness subtlety in `actionOutstanding()`: the "only show loans
+with balance > 0" filter previously ran in a PHP loop *after* fetching
+all matching loans. Moved into the SQL `WHERE` clause (a correlated
+subquery replicating `remainingBalancesFor()`'s own formula) precisely
+because pagination has to filter before `LIMIT`/`OFFSET`, not after - a
+PHP-side post-filter on a single page's worth of rows would have produced
+short or empty pages whenever a page happened to land on a mix of
+paid-off and still-owing loans.
+
+Verified: `EXPLAIN`/`FORCE INDEX` on all four target index shapes;
+directly instantiated `ActiveDataProvider` twice against the same query
+object with different page numbers to confirm non-overlapping,
+sequential pagination and that the shared query object is left unmutated
+afterward (Yii's `ActiveDataProvider::prepareModels()` clones internally
+before applying `limit()`/`offset()` - confirmed by reading the framework
+source rather than assumed) so reusing it for `batch()` afterward
+correctly still sees the full unfiltered-by-pagination row set; full
+`php -l` sweep; live smoke test across all 19 app pages plus every
+changed report's HTML and CSV output, cross-checked against a direct
+`Customer::find()` listing to confirm row counts matched exactly
+(including that the one soft-deleted test customer correctly stayed
+excluded from both the report and its CSV, same as before this change).

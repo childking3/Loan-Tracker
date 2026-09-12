@@ -57,10 +57,7 @@ class UserController extends Controller
     public function actionIndex()
     {
         $users = User::find()->orderBy(['full_name' => SORT_ASC])->all();
-        $roles = [];
-        foreach ($users as $user) {
-            $roles[$user->id] = $this->currentRole((int) $user->id);
-        }
+        $roles = $this->currentRoles(array_map(static fn (User $user) => (int) $user->id, $users));
 
         return $this->render('index', ['users' => $users, 'roles' => $roles]);
     }
@@ -241,12 +238,39 @@ class UserController extends Controller
      * staff/manager/admin hierarchy is expressed via addChild()
      * parent-child relationships (see m260910_200000_init_rbac), not
      * multiple role assignments - so getRolesByUser() returns at most one
-     * entry.
+     * entry. Used by actionUpdate() for a single user.
      */
     private function currentRole(int $userId): string
     {
         $roles = Yii::$app->authManager->getRolesByUser($userId);
         return $roles !== [] ? array_key_first($roles) : User::ROLE_STAFF;
+    }
+
+    /**
+     * Batch equivalent of currentRole() for actionIndex()'s listing - one
+     * query against auth_assignment for every user on the page instead of
+     * one getRolesByUser() call per row, which scales linearly with
+     * headcount.
+     *
+     * @param int[] $userIds
+     * @return array<int, string> role keyed by user id
+     */
+    private function currentRoles(array $userIds): array
+    {
+        if ($userIds === []) {
+            return [];
+        }
+
+        $assignments = Yii::$app->db->createCommand(
+            'SELECT user_id, item_name FROM ' . Yii::$app->authManager->assignmentTable . ' WHERE user_id IN (' . implode(',', $userIds) . ')'
+        )->queryAll();
+
+        $roles = array_fill_keys($userIds, User::ROLE_STAFF);
+        foreach ($assignments as $assignment) {
+            $roles[(int) $assignment['user_id']] = $assignment['item_name'];
+        }
+
+        return $roles;
     }
 
     private function findModel($id): User

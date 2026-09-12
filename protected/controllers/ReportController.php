@@ -8,6 +8,8 @@ use app\models\Loan;
 use app\models\Repayment;
 use app\models\User;
 use Yii;
+use yii\data\ActiveDataProvider;
+use yii\db\ActiveQuery;
 use yii\filters\AccessControl;
 use yii\web\Controller;
 
@@ -40,45 +42,90 @@ class ReportController extends Controller
         return $this->render('index');
     }
 
+    /**
+     * Paginated for HTML (row count scales with customer count, unlike
+     * e.g. the staff report); CSV export still covers every customer, read
+     * in batches via customerCsvRows() rather than one ->all() pull, so a
+     * large customer base doesn't have to fit in memory at once for an
+     * export.
+     */
     public function actionCustomers()
     {
-        // with('loans'): one query for all loans (WHERE customer_id IN
-        // (...)) instead of one Loan::find() per customer in a loop.
-        $customers = Customer::find()->with('loans')->orderBy(['full_name' => SORT_ASC])->all();
+        $header = ['Name', 'Phone', 'Loan Count', 'Total Borrowed', 'Outstanding'];
 
-        // Avoids calling getRemainingBalance() per loan (a KeyDB round
-        // trip, or SUM query, each) - remainingBalancesFor() answers the
-        // whole report in one query instead.
-        $allLoans = [];
-        foreach ($customers as $customer) {
+        // with('loans'): one query for all loans on the page (WHERE
+        // customer_id IN (...)) instead of one Loan::find() per customer.
+        $query = Customer::find()->with('loans')->orderBy(['full_name' => SORT_ASC]);
+        $dataProvider = new ActiveDataProvider(['query' => $query, 'pagination' => ['pageSize' => 50]]);
+
+        $pageCustomers = $dataProvider->getModels();
+        $pageLoans = [];
+        foreach ($pageCustomers as $customer) {
             foreach ($customer->loans as $loan) {
-                $allLoans[] = $loan;
+                $pageLoans[] = $loan;
             }
         }
-        $balances = Loan::remainingBalancesFor($allLoans);
+        $balances = Loan::remainingBalancesFor($pageLoans);
+        $rows = array_map(fn (Customer $c) => $this->customerRow($c, $balances), $pageCustomers);
 
-        $rows = [];
-        foreach ($customers as $customer) {
-            $loans = $customer->loans;
-            $totalBorrowed = 0.0;
-            $outstanding = 0.0;
-            foreach ($loans as $loan) {
-                $totalBorrowed += (float) $loan->principal_amount;
-                if (in_array($loan->status, ['active', 'overdue'], true)) {
-                    $outstanding += $balances[(int) $loan->id] ?? 0.0;
+        if (Yii::$app->request->get('export') === 'csv') {
+            CsvExporter::send('customers.csv', $header, $this->customerCsvRows($query));
+            return null;
+        }
+
+        return $this->render('customers', [
+            'header' => $header,
+            'rows' => $rows,
+            'dataProvider' => $dataProvider,
+        ]);
+    }
+
+    /**
+     * @param array<int, float> $balances
+     */
+    private function customerRow(Customer $customer, array $balances): array
+    {
+        $loans = $customer->loans;
+        $totalBorrowed = 0.0;
+        $outstanding = 0.0;
+        foreach ($loans as $loan) {
+            $totalBorrowed += (float) $loan->principal_amount;
+            if (in_array($loan->status, ['active', 'overdue'], true)) {
+                $outstanding += $balances[(int) $loan->id] ?? 0.0;
+            }
+        }
+
+        return [
+            $customer->full_name,
+            $customer->phone,
+            count($loans),
+            round($totalBorrowed, 2),
+            round($outstanding, 2),
+        ];
+    }
+
+    /**
+     * 500 customers (and their eager-loaded loans) at a time, not the
+     * whole table - keeps a CSV export's memory use flat regardless of
+     * customer count, using ActiveQuery::batch() rather than a hand-rolled
+     * LIMIT/OFFSET loop.
+     *
+     * @return iterable<array>
+     */
+    private function customerCsvRows(ActiveQuery $query): iterable
+    {
+        foreach ($query->batch(500) as $customerBatch) {
+            $batchLoans = [];
+            foreach ($customerBatch as $customer) {
+                foreach ($customer->loans as $loan) {
+                    $batchLoans[] = $loan;
                 }
             }
-
-            $rows[] = [
-                $customer->full_name,
-                $customer->phone,
-                count($loans),
-                round($totalBorrowed, 2),
-                round($outstanding, 2),
-            ];
+            $balances = Loan::remainingBalancesFor($batchLoans);
+            foreach ($customerBatch as $customer) {
+                yield $this->customerRow($customer, $balances);
+            }
         }
-
-        return $this->respond('customers', ['Name', 'Phone', 'Loan Count', 'Total Borrowed', 'Outstanding'], $rows);
     }
 
     public function actionLoans()
@@ -88,31 +135,57 @@ class ReportController extends Controller
         if (in_array($status, ['active', 'completed', 'overdue', 'cancelled'], true)) {
             $query->andWhere(['status' => $status]);
         }
+        $query->with(['customer', 'assignedStaff'])->orderBy(['created_at' => SORT_DESC]);
 
-        $loans = $query->with(['customer', 'assignedStaff'])->orderBy(['created_at' => SORT_DESC])->all();
-        $balances = Loan::remainingBalancesFor($loans);
+        $header = ['Loan Number', 'Customer', 'Status', 'Principal', 'Total Repayment', 'Remaining Balance', 'Start Date', 'Expected Completion', 'Assigned Staff'];
+        $dataProvider = new ActiveDataProvider(['query' => $query, 'pagination' => ['pageSize' => 50]]);
 
-        $rows = [];
-        foreach ($loans as $loan) {
-            $rows[] = [
-                $loan->loan_number,
-                $loan->customer->full_name,
-                $loan->status,
-                $loan->principal_amount,
-                $loan->total_repayment,
-                $balances[(int) $loan->id] ?? 0.0,
-                $loan->start_date,
-                $loan->expected_completion_date,
-                $loan->assignedStaff->full_name,
-            ];
+        $pageLoans = $dataProvider->getModels();
+        $balances = Loan::remainingBalancesFor($pageLoans);
+        $rows = array_map(fn (Loan $l) => $this->loanRow($l, $balances), $pageLoans);
+
+        if (Yii::$app->request->get('export') === 'csv') {
+            CsvExporter::send('loans.csv', $header, $this->loanCsvRows($query));
+            return null;
         }
 
-        return $this->respond(
-            'loans',
-            ['Loan Number', 'Customer', 'Status', 'Principal', 'Total Repayment', 'Remaining Balance', 'Start Date', 'Expected Completion', 'Assigned Staff'],
-            $rows,
-            ['status' => $status]
-        );
+        return $this->render('loans', [
+            'header' => $header,
+            'rows' => $rows,
+            'dataProvider' => $dataProvider,
+            'filters' => ['status' => $status],
+        ]);
+    }
+
+    /**
+     * @param array<int, float> $balances
+     */
+    private function loanRow(Loan $loan, array $balances): array
+    {
+        return [
+            $loan->loan_number,
+            $loan->customer->full_name,
+            $loan->status,
+            $loan->principal_amount,
+            $loan->total_repayment,
+            $balances[(int) $loan->id] ?? 0.0,
+            $loan->start_date,
+            $loan->expected_completion_date,
+            $loan->assignedStaff->full_name,
+        ];
+    }
+
+    /**
+     * @return iterable<array>
+     */
+    private function loanCsvRows(ActiveQuery $query): iterable
+    {
+        foreach ($query->batch(500) as $loanBatch) {
+            $balances = Loan::remainingBalancesFor($loanBatch);
+            foreach ($loanBatch as $loan) {
+                yield $this->loanRow($loan, $balances);
+            }
+        }
     }
 
     public function actionRepayments()
@@ -123,80 +196,161 @@ class ReportController extends Controller
             $this->scalarGet('from'),
             $this->scalarGet('to')
         );
+        $query->with(['loan.customer', 'recordedByStaff'])->orderBy(['payment_date' => SORT_DESC, 'created_at' => SORT_DESC]);
 
-        $rows = [];
-        foreach ($query->with(['loan.customer', 'recordedByStaff'])->orderBy(['payment_date' => SORT_DESC, 'created_at' => SORT_DESC])->all() as $repayment) {
-            $rows[] = [
-                $repayment->payment_date,
-                $repayment->loan->loan_number,
-                $repayment->loan->customer->full_name,
-                $repayment->amount,
-                $repayment->recordedByStaff->full_name,
-            ];
+        $header = ['Payment Date', 'Loan Number', 'Customer', 'Amount', 'Recorded By'];
+        $dataProvider = new ActiveDataProvider(['query' => $query, 'pagination' => ['pageSize' => 50]]);
+        $rows = array_map([$this, 'repaymentRow'], $dataProvider->getModels());
+
+        if (Yii::$app->request->get('export') === 'csv') {
+            CsvExporter::send('repayments.csv', $header, $this->repaymentCsvRows($query));
+            return null;
         }
 
-        return $this->respond(
-            'repayments',
-            ['Payment Date', 'Loan Number', 'Customer', 'Amount', 'Recorded By'],
-            $rows,
-            ['from' => $from, 'to' => $to]
-        );
+        return $this->render('repayments', [
+            'header' => $header,
+            'rows' => $rows,
+            'dataProvider' => $dataProvider,
+            'filters' => ['from' => $from, 'to' => $to],
+        ]);
     }
 
+    private function repaymentRow(Repayment $repayment): array
+    {
+        return [
+            $repayment->payment_date,
+            $repayment->loan->loan_number,
+            $repayment->loan->customer->full_name,
+            $repayment->amount,
+            $repayment->recordedByStaff->full_name,
+        ];
+    }
+
+    /**
+     * @return iterable<array>
+     */
+    private function repaymentCsvRows(ActiveQuery $query): iterable
+    {
+        foreach ($query->batch(500) as $repaymentBatch) {
+            foreach ($repaymentBatch as $repayment) {
+                yield $this->repaymentRow($repayment);
+            }
+        }
+    }
+
+    /**
+     * The "balance > 0" filter has to run in SQL, not just in the PHP loop
+     * below, so it's applied before pagination's LIMIT/OFFSET rather than
+     * after - filtering post-page would produce short or empty pages
+     * whenever a page happened to contain a mix of paid-off and
+     * still-owing loans. Same formula as Loan::remainingBalancesFor(),
+     * expressed as a correlated subquery.
+     */
     public function actionOutstanding()
     {
-        $loans = Loan::find()->with(['customer', 'assignedStaff'])->andWhere(['in', 'status', ['active', 'overdue']])->all();
-        $balances = Loan::remainingBalancesFor($loans);
+        $query = Loan::find()
+            ->with(['customer', 'assignedStaff'])
+            ->andWhere(['in', 'status', ['active', 'overdue']])
+            ->andWhere('total_repayment - COALESCE((SELECT SUM(amount) FROM {{%repayment}} WHERE loan_id = {{%loan}}.id), 0) > 0');
 
-        $rows = [];
-        foreach ($loans as $loan) {
-            $balance = $balances[(int) $loan->id] ?? 0.0;
-            if ($balance <= 0.0) {
-                continue;
-            }
+        $header = ['Loan Number', 'Customer', 'Status', 'Remaining Balance', 'Expected Completion', 'Assigned Staff'];
+        $dataProvider = new ActiveDataProvider(['query' => $query, 'pagination' => ['pageSize' => 50]]);
 
-            $rows[] = [
-                $loan->loan_number,
-                $loan->customer->full_name,
-                $loan->status,
-                $balance,
-                $loan->expected_completion_date,
-                $loan->assignedStaff->full_name,
-            ];
+        $pageLoans = $dataProvider->getModels();
+        $balances = Loan::remainingBalancesFor($pageLoans);
+        $rows = array_map(fn (Loan $l) => $this->outstandingRow($l, $balances), $pageLoans);
+
+        if (Yii::$app->request->get('export') === 'csv') {
+            CsvExporter::send('outstanding.csv', $header, $this->outstandingCsvRows($query));
+            return null;
         }
 
-        return $this->respond(
-            'outstanding',
-            ['Loan Number', 'Customer', 'Status', 'Remaining Balance', 'Expected Completion', 'Assigned Staff'],
-            $rows
-        );
+        return $this->render('outstanding', [
+            'header' => $header,
+            'rows' => $rows,
+            'dataProvider' => $dataProvider,
+        ]);
+    }
+
+    /**
+     * @param array<int, float> $balances
+     */
+    private function outstandingRow(Loan $loan, array $balances): array
+    {
+        return [
+            $loan->loan_number,
+            $loan->customer->full_name,
+            $loan->status,
+            $balances[(int) $loan->id] ?? 0.0,
+            $loan->expected_completion_date,
+            $loan->assignedStaff->full_name,
+        ];
+    }
+
+    /**
+     * @return iterable<array>
+     */
+    private function outstandingCsvRows(ActiveQuery $query): iterable
+    {
+        foreach ($query->batch(500) as $loanBatch) {
+            $balances = Loan::remainingBalancesFor($loanBatch);
+            foreach ($loanBatch as $loan) {
+                yield $this->outstandingRow($loan, $balances);
+            }
+        }
     }
 
     public function actionOverdue()
     {
-        $today = date('Y-m-d');
-        $loans = Loan::find()->with(['customer', 'assignedStaff'])->andWhere(['status' => 'overdue'])->orderBy(['expected_completion_date' => SORT_ASC])->all();
-        $balances = Loan::remainingBalancesFor($loans);
+        $query = Loan::find()->with(['customer', 'assignedStaff'])->andWhere(['status' => 'overdue'])->orderBy(['expected_completion_date' => SORT_ASC]);
 
-        $rows = [];
-        foreach ($loans as $loan) {
-            $daysOverdue = (int) ((strtotime($today) - strtotime($loan->expected_completion_date)) / 86400);
+        $header = ['Loan Number', 'Customer', 'Remaining Balance', 'Expected Completion', 'Days Overdue', 'Assigned Staff'];
+        $dataProvider = new ActiveDataProvider(['query' => $query, 'pagination' => ['pageSize' => 50]]);
 
-            $rows[] = [
-                $loan->loan_number,
-                $loan->customer->full_name,
-                $balances[(int) $loan->id] ?? 0.0,
-                $loan->expected_completion_date,
-                $daysOverdue,
-                $loan->assignedStaff->full_name,
-            ];
+        $pageLoans = $dataProvider->getModels();
+        $balances = Loan::remainingBalancesFor($pageLoans);
+        $rows = array_map(fn (Loan $l) => $this->overdueRow($l, $balances), $pageLoans);
+
+        if (Yii::$app->request->get('export') === 'csv') {
+            CsvExporter::send('overdue.csv', $header, $this->overdueCsvRows($query));
+            return null;
         }
 
-        return $this->respond(
-            'overdue',
-            ['Loan Number', 'Customer', 'Remaining Balance', 'Expected Completion', 'Days Overdue', 'Assigned Staff'],
-            $rows
-        );
+        return $this->render('overdue', [
+            'header' => $header,
+            'rows' => $rows,
+            'dataProvider' => $dataProvider,
+        ]);
+    }
+
+    /**
+     * @param array<int, float> $balances
+     */
+    private function overdueRow(Loan $loan, array $balances): array
+    {
+        $daysOverdue = (int) ((strtotime(date('Y-m-d')) - strtotime($loan->expected_completion_date)) / 86400);
+
+        return [
+            $loan->loan_number,
+            $loan->customer->full_name,
+            $balances[(int) $loan->id] ?? 0.0,
+            $loan->expected_completion_date,
+            $daysOverdue,
+            $loan->assignedStaff->full_name,
+        ];
+    }
+
+    /**
+     * @return iterable<array>
+     */
+    private function overdueCsvRows(ActiveQuery $query): iterable
+    {
+        foreach ($query->batch(500) as $loanBatch) {
+            $balances = Loan::remainingBalancesFor($loanBatch);
+            foreach ($loanBatch as $loan) {
+                yield $this->overdueRow($loan, $balances);
+            }
+        }
     }
 
     public function actionDailyCollections()
