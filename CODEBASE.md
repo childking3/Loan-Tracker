@@ -5591,4 +5591,48 @@ as a phone browser would, same login/session/RBAC/audit trail, no new
 API surface. Full detail, phased build log, and open decisions
 (WireGuard-vs-real-domain access model chiefly) live in that repo's own
 `PHASES.md`/`REVIEW.md`/`CODEBASE.md`, not duplicated here.
-name+phone match, per this project's standing test-cleanup rule.
+
+## Dashboard staff drill-down linked to loans staff couldn't open - 2026-09-15
+
+Reported directly by the user testing the app: staff saw a loan on their
+dashboard they couldn't actually view. Traced, not guessed: `dashboard/
+index.php`'s "Staff performance" table (visible to every `viewDashboard`
+user, i.e. every staff member) links every colleague's name to
+`dashboard/staff?id=X`; that page (`DashboardController::actionStaff()`)
+lists every loan assigned to that colleague with a direct link to
+`loan/view`. But `LoanController::actionView()`'s real access check only
+allows `viewAllLoans` (manager+) or a loan actually assigned to the
+current user - so any staff member clicking a colleague's name from their
+own dashboard, then a loan number from that page, hit a
+`ForbiddenHttpException`. A live path from a rendered link on the page
+every staff member sees, not an edge case.
+
+Also corrected a wrong docblock on `actionStaff()` while there - it
+claimed this page was "reachable only by guessing an id, since no link
+to it is rendered," which was never true; the staff-performance table
+has always linked to it directly.
+
+**Fix**: `dashboard/staff.php`'s loan-number cell now only renders as a
+link when `Yii::$app->user->can('viewAllLoans') ||
+Yii::$app->user->can('viewAssignedLoans', ['loan' => $loan])` - reusing
+`LoanController`'s own RBAC check exactly (the `IsAssignedStaffRule`
+that `viewAssignedLoans` is gated by, not a hand-rolled second copy of
+"is this assigned to me"), so the link's visibility can't drift out of
+sync with the real permission boundary. Otherwise renders the loan
+number as plain text - the data staff already see in the "Total loans"/
+"Active loans" counts on the same page isn't hidden, just no longer a
+dead-end link. The customer-name link on the same row was left alone -
+`CustomerController` has no per-record scoping (any staff can already
+view any customer directly), so it was never inconsistent.
+
+Verified live, not assumed: found staff1 (id 3) and staff2 (id 4)'s
+real user ids and loan assignments via a direct DB query (using the
+app's own `protected/.env` credentials), logged in as staff1, confirmed
+`dashboard/staff?id=4` (a colleague) now renders staff2's loan numbers
+as plain text while their own `dashboard/staff?id=3` still renders
+clickable links; confirmed `loan/view?id=5` (staff2's loan) is still a
+403 for staff1 directly, `loan/view?id=2` (staff1's own) is a 200 - the
+link visibility change exactly tracks the real access boundary, neither
+over- nor under-restrictive. Also confirmed manager1 (has `viewAllLoans`)
+still sees every loan on that same page as a live link, unaffected.
+Logged out both test sessions afterward.

@@ -42,8 +42,15 @@ class DashboardController extends Controller
      * Drill-down from the dashboard's staff performance table - same
      * viewDashboard permission, since the table itself already shows
      * every staff member's counts to every other. Admins are excluded
-     * here too (see DashboardCache::computeTotals()); reachable only by
-     * guessing an id, since no link to it is rendered.
+     * here too (see DashboardCache::computeTotals()). Directly linked
+     * from every staff name in dashboard/index.php's table, so any
+     * staff member can open any colleague's page this way - not just
+     * reachable by guessing an id. Individual loan numbers in this
+     * view only link through to loan/view for loans the current user
+     * can actually open (see staff.php) - fixed 2026-09-15, previously
+     * linked every loan regardless of the viewer's own access, so
+     * clicking a colleague's loan from here could dead-end in a
+     * ForbiddenHttpException even though the link itself rendered fine.
      */
     public function actionStaff($id)
     {

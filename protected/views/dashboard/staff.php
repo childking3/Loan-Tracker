@@ -62,7 +62,11 @@ $this->title = $staff->full_name;
         <tbody>
         <?php foreach ($loans as $loan): ?>
             <tr>
-                <td><?= Html::a(Html::encode($loan->loan_number), ['loan/view', 'id' => $loan->id]) ?></td>
+                <td><?php if (Yii::$app->user->can('viewAllLoans') || Yii::$app->user->can('viewAssignedLoans', ['loan' => $loan])): ?>
+                    <?= Html::a(Html::encode($loan->loan_number), ['loan/view', 'id' => $loan->id]) ?>
+                <?php else: ?>
+                    <?= Html::encode($loan->loan_number) ?>
+                <?php endif; ?></td>
                 <td><?= Html::a(Html::encode($loan->customer->full_name), ['customer/view', 'id' => $loan->customer_id]) ?></td>
                 <td><span class="badge badge-<?= Html::encode($loan->status) ?>"><?= Html::encode($loan->status) ?></span></td>
                 <td><?= Html::encode(Currency::format($loan->principal_amount)) ?></td>
