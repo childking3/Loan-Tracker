@@ -34,7 +34,7 @@ $this->title = 'Customers';
     <tbody>
     <?php foreach ($dataProvider->getModels() as $customer): ?>
         <tr>
-            <td><?= Html::encode($customer->full_name) ?></td>
+            <td><?= Html::a(Html::encode($customer->full_name), ['customer/view', 'id' => $customer->id]) ?></td>
             <td><?= Html::encode($customer->phone) ?></td>
             <td><?= Html::encode($customer->address) ?></td>
             <td><?= Html::a('View', ['customer/view', 'id' => $customer->id]) ?></td>
