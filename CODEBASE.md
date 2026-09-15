@@ -5770,3 +5770,38 @@ cross-staff hiding still holds under the new split - staff1 viewing
 customer id 1 still sees only their own 3 loans (correctly divided
 between the two sections by actual status), the other 6 still fully
 hidden.
+
+### "Add customer" link on the dashboard staff drill-down page
+
+Asked directly, flagged by the user themselves as needing security
+care. Confirmed first, not assumed, what was actually being asked for
+via a clarifying question - two real readings existed ("every staff can
+already add customers" - true today, nothing to build; vs "add the
+option to dashboard/staff.php specifically" - the one meant).
+
+The security question worth being careful about: this page is about a
+*specific* staff member (`dashboard/staff?id=X`), so a careless
+implementation could end up attributing a customer's creation to
+whichever staff member's page happens to be open, rather than
+whoever's actually logged in and clicking the button - a real audit-
+trail integrity problem, not a hypothetical. Checked
+`CustomerController::actionCreate()` directly before writing anything:
+`created_by` is explicitly set from `Yii::$app->user->id` right before
+save (`created_by` also isn't in `Customer::rules()` at all, so it was
+never mass-assignable to begin with, even before that explicit set).
+So the link is deliberately plain `customer/create` with no staff id or
+other parameter threaded through - there's no code path here that
+could misattribute a creation, and the link doesn't imply otherwise via
+its own wording either (no "add for <staff>" framing).
+
+Gated behind `\Yii::$app->user->can('manageCustomers')`, matching the
+same conditional-link pattern `customer/view.php` already uses for its
+"New loan" button - in practice always true for anyone who can reach
+this page at all (`viewDashboard` and `manageCustomers` are both
+granted to every role starting at `staff`), but checked explicitly
+rather than assumed, consistent with how every other conditional
+action link in this app is written.
+
+Verified live: the link renders identically on staff1's own page and
+on a colleague's page (expected - it doesn't depend on whose page is
+open), and actually resolves to the real create form (`200`).

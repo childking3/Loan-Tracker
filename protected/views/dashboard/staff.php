@@ -19,6 +19,20 @@ $visibleLoans = array_values(array_filter($loans, function ($loan) {
 
 <p class="muted"><?= Html::encode($staff->username) ?> &middot; <?= Html::encode($staff->email) ?></p>
 
+<?php if (\Yii::$app->user->can('manageCustomers')): ?>
+    <!--
+    Deliberately plain customer/create, no staff id passed through:
+    Customer has no staff-assignment concept at all (unlike Loan), and
+    created_by must always reflect whoever is actually logged in and
+    submits the form - not the staff member whose page happens to be
+    open. CustomerController::actionCreate() sets created_by from
+    Yii::$app->user->id itself, so there's nothing here that could
+    override or spoof that even by mistake, but the link doesn't try to
+    imply otherwise either (e.g. no "creating as <staff>" wording).
+    -->
+    <p><?= Html::a('Add customer', ['customer/create']) ?></p>
+<?php endif; ?>
+
 <div class="stat-group">
     <h3 class="stat-group-label">Loans</h3>
     <div class="stats">
