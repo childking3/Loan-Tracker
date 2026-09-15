@@ -45,7 +45,11 @@ $this->title = $model->full_name;
         <tbody>
         <?php foreach ($loans as $loan): ?>
             <tr>
-                <td><?= Html::a(Html::encode($loan->loan_number), ['loan/view', 'id' => $loan->id]) ?></td>
+                <td><?php if (\Yii::$app->user->can('viewAllLoans') || \Yii::$app->user->can('viewAssignedLoans', ['loan' => $loan])): ?>
+                    <?= Html::a(Html::encode($loan->loan_number), ['loan/view', 'id' => $loan->id]) ?>
+                <?php else: ?>
+                    <?= Html::encode($loan->loan_number) ?>
+                <?php endif; ?></td>
                 <td><?= Html::encode($loan->assignedStaff->full_name ?? '') ?></td>
                 <td><?= Html::encode(Currency::format($loan->principal_amount)) ?></td>
                 <td><?= Html::encode(Currency::format($loan->total_repayment)) ?></td>

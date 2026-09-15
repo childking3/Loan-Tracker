@@ -5636,3 +5636,66 @@ link visibility change exactly tracks the real access boundary, neither
 over- nor under-restrictive. Also confirmed manager1 (has `viewAllLoans`)
 still sees every loan on that same page as a live link, unaffected.
 Logged out both test sessions afterward.
+
+Verified the fix again from a different angle the user asked for
+directly: logged in as staff2, opened one of staff2's own loans
+(`loan/view?id=3` - `200`, correctly allowed), logged out, logged in as
+staff1, tried the same loan directly (`403`, "not allowed") and via
+`dashboard/staff?id=4` (staff2's user id - rendered as plain text, no
+link). Same result as the first pass, confirmed from the "staff2 does a
+loan, staff1 tries to view it" angle specifically, not just re-checked
+from the same direction.
+
+### Same pattern, found on a second page - customer/view.php
+
+Asked to check for other instances of the same flaw. `customer/view.php`
+had the identical bug: `CustomerController::actionView()` has no
+per-staff scoping (any staff can view any customer, by design - not the
+bug), and its "Loan history" table lists every loan that customer has
+ever had, from any staff member, with every loan number unconditionally
+linked to `loan/view` - same dead-end. Arguably hit more often in
+practice than the dashboard path, since customers (unlike loans) are
+shared across staff and a customer with a multi-year history is likely
+to have had more than one loan officer.
+
+Same fix, same reused RBAC check
+(`\Yii::$app->user->can('viewAllLoans') || \Yii::$app->user->can
+('viewAssignedLoans', ['loan' => $loan])`) - plain text instead of a
+link when the viewer can't actually open it.
+
+**Full audit for the same pattern elsewhere**, not just these two spots:
+grepped every `Html::a` targeting `loan/view` across the whole `views/`
+tree (three total - dashboard/staff.php and customer/view.php, both
+fixed; loan/index.php, already safe since its own query is scoped to
+`assigned_staff_id` for staff before rendering, so every loan it shows
+them is genuinely theirs). Confirmed `IsAssignedStaffRule` itself is
+sound (default-denies if no loan is passed, compares `assigned_staff_id`
+correctly - the two fixes above are only as good as this rule, so worth
+checking directly rather than assuming). Checked every other controller
+that touches `Loan` data for the same class of gap:
+`GuarantorController` is `manageLoans`-only (staff can't reach it at
+all); `ReportController`/`LogController` (loan/staff CSV exports, audit
+log) are gated by `viewReports`/`viewAuditLog`, both manager+ roles that
+already carry `viewAllLoans`, so safe by construction even without a
+per-record check. No AJAX/autocomplete/JSON endpoint exists anywhere in
+the app that returns loan data outside the normal page-render path
+(`dashboard/poll` is the only JSON endpoint, and it only ever returns
+aggregate totals, never individual records).
+
+Verified live: staff1 viewing customer id 3 (Fatima Ibrahim, who has a
+staff2-assigned loan, LN-000003) now sees that loan number rendered as
+plain text, not a link - `curl`, logged-in session, same technique as
+every other check in this section.
+
+### Customer names now clickable in the customer list
+
+Separate, smaller ask handled in the same pass: `customer/index.php`
+already had a "View" link in its own column, but the customer's name
+itself wasn't clickable - not the expected click target. Now
+`Html::a(...)` wraps the name too, pointing at the same `customer/view`
+destination, matching the name-as-link convention already used
+elsewhere (the dashboard drill-down's customer/loan links). The
+separate "View" link was left in place rather than removed - not asked
+for, and harmless being slightly redundant. Verified live: staff1's
+`customer/index` now renders `<a href="/customer/view?id=5">Blessing
+Adeyemi</a>` instead of plain text.
