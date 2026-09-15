@@ -5699,3 +5699,41 @@ separate "View" link was left in place rather than removed - not asked
 for, and harmless being slightly redundant. Verified live: staff1's
 `customer/index` now renders `<a href="/customer/view?id=5">Blessing
 Adeyemi</a>` instead of plain text.
+
+### Plain-text loan numbers replaced with hiding the row entirely
+
+Direct follow-up: plain, non-clickable text for an inaccessible loan
+number was itself the confusing part - "some work and some don't" in
+the same table, no explanation why. Changed both `dashboard/staff.php`
+and `customer/view.php` to filter the loans list down to only what the
+current viewer can actually open (`array_filter` against the same
+`viewAllLoans`/`viewAssignedLoans` check, computed once at the top of
+the view rather than repeated per row) and skip the row entirely for
+anything else.
+
+That surfaced a real related gap while implementing it, not just a
+style choice: on `dashboard/staff.php`, every loan on that page belongs
+to the *same* staff member (the one being drilled into), so for a staff
+viewer without `viewAllLoans` looking at a *colleague's* page, the
+visibility check is all-or-nothing - either every loan is theirs (their
+own page) or none are (anyone else's page). Filtering rows alone would
+have left the table silently empty with just a header row whenever a
+staff member looked at a colleague's performance page - which reads as
+"this person has zero loans," actively wrong, not just unclear. Added a
+third message state distinguishing that from the real empty case:
+"No loans assigned to this staff member yet." (the true `$loans` array
+is empty) vs "This staff member has loans, but you don't have access to
+view them individually." (`$loans` has rows, `$visibleLoans` doesn't).
+`customer/view.php` got the same distinction, though partial visibility
+is actually possible there (a customer can have loans from more than
+one staff member, unlike a single staff member's own loan list).
+
+Verified live against real mixed data, not just the single-loan cases
+already covered above: customer id 1 has 9 loans split across two staff
+(3 belonging to staff1, 6 to manager1/id 2) - staff1 viewing that
+customer now sees exactly their 3 loans, correctly linked, with the
+other 6 not shown at all (not even as dead text). Confirmed staff1
+viewing staff2's now-fully-hidden dashboard page shows the new "has
+loans, but..." message instead of an empty table. Confirmed staff1's
+own dashboard page is unaffected (still 7 linked loans, matching their
+real assigned count).

@@ -8,6 +8,10 @@ use app\helpers\Currency;
 use yii\helpers\Html;
 
 $this->title = $model->full_name;
+
+$visibleLoans = array_values(array_filter($loans, function ($loan) {
+    return \Yii::$app->user->can('viewAllLoans') || \Yii::$app->user->can('viewAssignedLoans', ['loan' => $loan]);
+}));
 ?>
 <h1><?= Html::encode($model->full_name) ?></h1>
 
@@ -27,6 +31,8 @@ $this->title = $model->full_name;
 <?php endif; ?>
 <?php if ($loans === []): ?>
     <p>No loans yet.</p>
+<?php elseif ($visibleLoans === []): ?>
+    <p>This customer has loan history, but you don't have access to view it individually.</p>
 <?php else: ?>
     <div class="table-scroll">
     <table>
@@ -43,13 +49,9 @@ $this->title = $model->full_name;
         </tr>
         </thead>
         <tbody>
-        <?php foreach ($loans as $loan): ?>
+        <?php foreach ($visibleLoans as $loan): ?>
             <tr>
-                <td><?php if (\Yii::$app->user->can('viewAllLoans') || \Yii::$app->user->can('viewAssignedLoans', ['loan' => $loan])): ?>
-                    <?= Html::a(Html::encode($loan->loan_number), ['loan/view', 'id' => $loan->id]) ?>
-                <?php else: ?>
-                    <?= Html::encode($loan->loan_number) ?>
-                <?php endif; ?></td>
+                <td><?= Html::a(Html::encode($loan->loan_number), ['loan/view', 'id' => $loan->id]) ?></td>
                 <td><?= Html::encode($loan->assignedStaff->full_name ?? '') ?></td>
                 <td><?= Html::encode(Currency::format($loan->principal_amount)) ?></td>
                 <td><?= Html::encode(Currency::format($loan->total_repayment)) ?></td>
