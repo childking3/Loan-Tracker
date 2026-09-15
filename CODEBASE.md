@@ -5573,3 +5573,22 @@ within-file case correctly named the just-imported row, confirming the
 in-memory map extension works), and the one genuinely new row imported
 successfully. Test customer removed immediately after by exact
 name+phone match, per this project's standing test-cleanup rule.
+
+## Android app - picked back up, 2026-09-15 overnight
+
+The "Android webapp conversion" question opened on 2026-09-11 (see above)
+got its follow-through tonight, in a separate repo: `/home/cipher/
+loan-staff-android`. Re-confirmed the 2026-09-11 blocker still holds -
+this box still has no TLS (`ss -tlnp` shows no `:443` listener), no
+`.env`, and no reverse proxy process running, only plain HTTP on
+`127.0.0.1`/`10.10.2.2`(a WireGuard interface, `wg1`)/`local.cipher-
+lab.org` - so a Digital-Asset-Link-verified Trusted Web Activity (needs a
+publicly reachable HTTPS domain for Google's verification servers to hit)
+still isn't buildable. Built as a plain native WebView-wrapper shell
+instead, per the 2026-09-11 decision's own fallback framing. No changes
+needed in this repo for it - the shell talks to the existing site exactly
+as a phone browser would, same login/session/RBAC/audit trail, no new
+API surface. Full detail, phased build log, and open decisions
+(WireGuard-vs-real-domain access model chiefly) live in that repo's own
+`PHASES.md`/`REVIEW.md`/`CODEBASE.md`, not duplicated here.
+name+phone match, per this project's standing test-cleanup rule.
