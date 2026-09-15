@@ -5737,3 +5737,36 @@ viewing staff2's now-fully-hidden dashboard page shows the new "has
 loans, but..." message instead of an empty table. Confirmed staff1's
 own dashboard page is unaffected (still 7 linked loans, matching their
 real assigned count).
+
+### customer/view.php: split into Active loans / History
+
+Asked directly: a customer's loan list mixed a loan still being paid
+off with one closed out long ago in one undifferentiated table, easy to
+misread as "which of these do I actually need to act on." Split into
+two sections - Active (`active`/`overdue` status) and History
+(`completed`/`cancelled`) - each its own table, computed from the same
+already-access-filtered `$visibleLoans` from the fix above (the
+cross-staff hiding and the active/history split are independent
+concerns, applied in sequence, not two copies of similar logic).
+
+Pulled the row-rendering table markup into a new partial,
+`customer/_loan_table.php`, taking a `$loans` array - rendered twice
+(once per section) rather than duplicating the 8-column table twice
+inline, matching this codebase's existing partial convention
+(`_flashes.php`).
+
+Handles every combination, not just the common case: no loans at all,
+loans exist but none visible to this viewer (pre-existing message,
+unchanged), visible loans but none active, visible loans but no
+history, and both empty within an otherwise non-empty visible set - each
+renders its own accurate message rather than a table silently missing
+one section wouldn't explain.
+
+Verified live: customer id 1 (9 loans, all active/overdue) renders a
+populated Active table and "No completed or cancelled loans." for
+History; customer id 3 (1 completed loan, no active ones) renders "No
+active loans." and a populated History table. Re-confirmed the
+cross-staff hiding still holds under the new split - staff1 viewing
+customer id 1 still sees only their own 3 loans (correctly divided
+between the two sections by actual status), the other 6 still fully
+hidden.

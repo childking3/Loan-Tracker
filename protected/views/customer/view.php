@@ -4,13 +4,24 @@
 /** @var \app\models\Customer $model */
 /** @var \app\models\Loan[] $loans */
 
-use app\helpers\Currency;
 use yii\helpers\Html;
 
 $this->title = $model->full_name;
 
 $visibleLoans = array_values(array_filter($loans, function ($loan) {
     return \Yii::$app->user->can('viewAllLoans') || \Yii::$app->user->can('viewAssignedLoans', ['loan' => $loan]);
+}));
+
+// Active/overdue loans (still being paid off) vs completed/cancelled ones
+// (history) split into separate tables - a customer with one loan still
+// running and another long since paid off looked like a single
+// undifferentiated list otherwise, easy to misread as "which of these is
+// the one I actually need to act on".
+$activeLoans = array_values(array_filter($visibleLoans, function ($loan) {
+    return in_array($loan->status, ['active', 'overdue'], true);
+}));
+$pastLoans = array_values(array_filter($visibleLoans, function ($loan) {
+    return in_array($loan->status, ['completed', 'cancelled'], true);
 }));
 ?>
 <h1><?= Html::encode($model->full_name) ?></h1>
@@ -25,7 +36,7 @@ $visibleLoans = array_values(array_filter($loans, function ($loan) {
     <?= Html::submitButton('Delete', ['onclick' => "return confirm('Delete this customer?');"]) ?>
 <?= Html::endForm() ?>
 
-<h2>Loan history</h2>
+<h2>Loans</h2>
 <?php if (\Yii::$app->user->can('manageLoans')): ?>
     <p><?= Html::a('New loan', ['loan/create', 'customerId' => $model->id]) ?></p>
 <?php endif; ?>
@@ -34,34 +45,17 @@ $visibleLoans = array_values(array_filter($loans, function ($loan) {
 <?php elseif ($visibleLoans === []): ?>
     <p>This customer has loan history, but you don't have access to view it individually.</p>
 <?php else: ?>
-    <div class="table-scroll">
-    <table>
-        <thead>
-        <tr>
-            <th>Loan number</th>
-            <th>Assigned staff</th>
-            <th>Principal</th>
-            <th>Total repayment</th>
-            <th>Remaining balance</th>
-            <th>Status</th>
-            <th>Start date</th>
-            <th>Expected completion</th>
-        </tr>
-        </thead>
-        <tbody>
-        <?php foreach ($visibleLoans as $loan): ?>
-            <tr>
-                <td><?= Html::a(Html::encode($loan->loan_number), ['loan/view', 'id' => $loan->id]) ?></td>
-                <td><?= Html::encode($loan->assignedStaff->full_name ?? '') ?></td>
-                <td><?= Html::encode(Currency::format($loan->principal_amount)) ?></td>
-                <td><?= Html::encode(Currency::format($loan->total_repayment)) ?></td>
-                <td><?= Html::encode(Currency::format($loan->getRemainingBalance())) ?></td>
-                <td><span class="badge badge-<?= Html::encode($loan->status) ?>"><?= Html::encode($loan->status) ?></span></td>
-                <td><?= Html::encode($loan->start_date) ?></td>
-                <td><?= Html::encode($loan->expected_completion_date) ?></td>
-            </tr>
-        <?php endforeach; ?>
-        </tbody>
-    </table>
-    </div>
+    <h3>Active</h3>
+    <?php if ($activeLoans === []): ?>
+        <p>No active loans.</p>
+    <?php else: ?>
+        <?= $this->render('_loan_table', ['loans' => $activeLoans]) ?>
+    <?php endif; ?>
+
+    <h3>History</h3>
+    <?php if ($pastLoans === []): ?>
+        <p>No completed or cancelled loans.</p>
+    <?php else: ?>
+        <?= $this->render('_loan_table', ['loans' => $pastLoans]) ?>
+    <?php endif; ?>
 <?php endif; ?>
