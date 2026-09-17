@@ -12,11 +12,7 @@ $this->title = 'New loan for ' . $customer->full_name;
 ?>
 <h1>New loan for <?= Html::encode($customer->full_name) ?></h1>
 
-<?php foreach ($model->getErrors() as $errors): ?>
-    <?php foreach ($errors as $error): ?>
-        <div><?= Html::encode($error) ?></div>
-    <?php endforeach; ?>
-<?php endforeach; ?>
+<?= $this->render('//_error_list', ['model' => $model]) ?>
 
 <?= Html::beginForm() ?>
     <?= Html::hiddenInput('Loan[customer_id]', $customer->id) ?>

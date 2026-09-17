@@ -3,6 +3,7 @@
 /** @var \yii\web\View $this */
 /** @var \app\models\Loan[] $loans */
 
+use app\helpers\Badge;
 use app\helpers\Currency;
 use yii\helpers\Html;
 ?>
@@ -28,7 +29,7 @@ use yii\helpers\Html;
             <td><?= Html::encode(Currency::format($loan->principal_amount)) ?></td>
             <td><?= Html::encode(Currency::format($loan->total_repayment)) ?></td>
             <td><?= Html::encode(Currency::format($loan->getRemainingBalance())) ?></td>
-            <td><span class="badge badge-<?= Html::encode($loan->status) ?>"><?= Html::encode($loan->status) ?></span></td>
+            <td><?= Badge::status($loan->status) ?></td>
             <td><?= Html::encode($loan->start_date) ?></td>
             <td><?= Html::encode($loan->expected_completion_date) ?></td>
         </tr>

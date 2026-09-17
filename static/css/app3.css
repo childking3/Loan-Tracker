@@ -1,0 +1,972 @@
+/*
+ * Application stylesheet. Plain, hand-written CSS - no Bootstrap, no build
+ * step - matching the project's no-Composer, no-widget-libraries decision.
+ * Styling mostly targets bare HTML elements (table, form, button) rather
+ * than requiring a class on every element, since the views were written
+ * with plain Html:: helper calls throughout. A handful of utility classes
+ * (.flash-*, .badge-*, .stat-tile, .auth-card) exist only where a plain tag
+ * selector cannot express the distinction (for example, a success flash
+ * message versus an error one).
+ *
+ * Redesigned 2026-09-11 at the user's request for something that reads as
+ * modern without reading as templated/AI-generated. The previous pass was
+ * a competent but generic admin-dashboard look - primary blue
+ * (#2f5fdc, the same family every Bootstrap/Tailwind starter defaults to),
+ * one sans-serif everywhere with no real type hierarchy, fully rounded
+ * pill badges, a soft ambient shadow on every card, and a boxed
+ * stat-tile-with-colored-top-border pattern that's a stock component in
+ * most admin-template libraries. None of that is wrong exactly, but none
+ * of it is a decision either - it's what you get by not choosing.
+ *
+ * This pass makes actual choices instead, all still within the
+ * "restrained, no gradients/animation/emoji" standing instruction:
+ *  - A warm ledger-book palette (deep umber/brown + a muted gold accent on
+ *    a cream ground) instead of blue-on-cool-gray - distinct from both the
+ *    generic SaaS-blue look and the equally common purple/indigo one, and
+ *    fits a lending business better than either (a ledger, not a startup).
+ *  - A serif for headings paired with the system sans for body/UI text -
+ *    real typographic hierarchy from choosing two typefaces on purpose,
+ *    not just varying one font's size and weight. System font stacks only
+ *    (Georgia/Palatino-family for serif) - no external font loading, this
+ *    project has no CDN dependency anywhere and isn't starting one here.
+ *  - Small, sharp radii (2-3px) instead of the soft 6-10px rounding
+ *    applied to everything - a ledger has corners, not a bubble.
+ *  - Borders instead of ambient shadows for separating surfaces - flat,
+ *    not "floating card." The one shadow kept is a small, tight one on the
+ *    auth card specifically, since that page has nothing else on it to
+ *    give the card edges definition against the page background.
+ *  - Status badges are small rectangular tags, not fully-rounded pills -
+ *    pills read as the single most common "this is a generic admin
+ *    template" tell.
+ *  - Dashboard stat figures are a divided typographic row (tabular
+ *    serif numerals, small-caps labels, hairline dividers between them)
+ *    instead of individual boxed cards each with a colored top border -
+ *    that boxed-card-with-accent-bar pattern is a stock dashboard-kit
+ *    component; a plain row of numbers reads as considered layout
+ *    instead.
+ */
+
+:root {
+    --color-bg: #f7f3ea;
+    --color-surface: #fffdf9;
+    --color-border: #ddd2ba;
+    --color-text: #29241d;
+    --color-muted: #7d7160;
+    --color-primary: #5c4630;
+    --color-primary-dark: #3e2f1e;
+    --color-primary-light: #ede2cd;
+    --color-accent: #9c7530;
+    --color-success-bg: #e9f0e2;
+    --color-success-text: #3f6b3d;
+    --color-success-border: #c6dab8;
+    --color-error-bg: #f6e7e0;
+    --color-error-text: #9c4223;
+    --color-error-border: #e4c2ac;
+    --color-header-bg: #362a1c;
+    --color-header-text: #f1e6d2;
+    --radius-sm: 3px;
+    --radius-md: 4px;
+    --shadow-card: 0 1px 3px rgba(41, 36, 29, 0.14);
+    --transition-fast: 120ms ease;
+}
+
+/*
+ * Dark mode: same variable set, re-pointed at dark equivalents, switched
+ * by a `data-theme="dark"` attribute on <html>. The attribute (not a
+ * media query alone) is what makes it a togglable preference rather than
+ * just following the OS setting - see the inline script in
+ * layouts/main.php for how it's set before first paint and how it's
+ * flipped by the header button. --color-header-bg/--color-header-text
+ * barely change since the header is already dark in light mode.
+ */
+[data-theme="dark"] {
+    --color-bg: #17130e;
+    --color-surface: #211b14;
+    --color-border: #3d3323;
+    --color-text: #eee3d0;
+    --color-muted: #a89678;
+    --color-primary: #cfa568;
+    --color-primary-dark: #e0bb84;
+    --color-primary-light: #3a2f1d;
+    --color-accent: #d8ac5c;
+    --color-success-bg: #1f2f1c;
+    --color-success-text: #8fc17c;
+    --color-success-border: #33492c;
+    --color-error-bg: #34211a;
+    --color-error-text: #e39d7f;
+    --color-error-border: #55362a;
+    --color-header-bg: #221a10;
+    --color-header-text: #eee1c6;
+    --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] th {
+    background: #29221677;
+}
+
+[data-theme="dark"] tbody tr:nth-child(even) {
+    background: #201a1277;
+}
+
+[data-theme="dark"] .badge-cancelled {
+    background: #322a1d;
+    color: var(--color-muted);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+a {
+    color: var(--color-primary);
+    text-decoration: none;
+}
+
+[data-theme="dark"] a {
+    color: var(--color-accent);
+}
+
+a:hover {
+    color: var(--color-accent);
+    text-decoration: underline;
+}
+
+h1, h2, h3 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    line-height: 1.25;
+    color: var(--color-text);
+}
+
+h1 {
+    font-size: 1.65rem;
+    font-weight: 700;
+    margin: 0 0 1.2rem;
+    letter-spacing: 0.01em;
+}
+
+h2 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin: 2rem 0 0.9rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+/* Layout */
+
+header {
+    background: var(--color-header-bg);
+    color: var(--color-header-text);
+    padding: 0.85rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    font-weight: 700;
+    font-size: 1.08rem;
+    letter-spacing: 0.01em;
+    color: var(--color-header-text);
+    white-space: nowrap;
+}
+
+.brand:hover {
+    text-decoration: none;
+    color: var(--color-header-text);
+}
+
+.brand-mark {
+    color: var(--color-accent);
+    font-style: italic;
+}
+
+header a {
+    color: var(--color-header-text);
+}
+
+header nav {
+    display: flex;
+    gap: 0.2rem;
+    flex-wrap: wrap;
+    margin-right: auto;
+}
+
+header nav a {
+    opacity: 0.78;
+    padding: 0.4rem 0.7rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+    transition: background-color var(--transition-fast), opacity var(--transition-fast);
+}
+
+header nav a:hover {
+    opacity: 1;
+    background: rgba(241, 230, 210, 0.08);
+    text-decoration: none;
+}
+
+header nav a.is-active {
+    opacity: 1;
+    background: rgba(241, 230, 210, 0.14);
+    box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+header form {
+    margin: 0;
+}
+
+/*
+ * header input[type="submit"] alongside header button: the logout
+ * control is Html::submitButton(), which renders <input type="submit">,
+ * not <button> - a plain `header button` selector never touches it, and
+ * without this it silently falls through to the generic solid-fill
+ * button style below instead of the header's ghost-button treatment
+ * (caught by actually looking at a rendered screenshot, not just
+ * reading the CSS - the two looked identical in the source order but
+ * rendered as two different button styles sitting side by side).
+ */
+header button,
+header input[type="submit"] {
+    background: transparent;
+    border: 1px solid rgba(241, 230, 210, 0.3);
+    color: var(--color-header-text);
+    padding: 0.4rem 0.8rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.87rem;
+    font-weight: 400;
+}
+
+header button:hover,
+header input[type="submit"]:hover {
+    background: rgba(241, 230, 210, 0.08);
+    border-color: rgba(241, 230, 210, 0.5);
+}
+
+.user-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.88rem;
+    color: var(--color-header-text);
+    opacity: 0.75;
+    text-decoration: none;
+}
+
+.user-chip:hover {
+    opacity: 1;
+}
+
+.avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    vertical-align: middle;
+}
+
+.avatar-placeholder {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+header .avatar-placeholder {
+    background: rgba(241, 230, 210, 0.16);
+    color: var(--color-header-text);
+}
+
+.avatar-large {
+    width: 5rem;
+    height: 5rem;
+    font-size: 1.75rem;
+}
+
+main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 1.75rem 1.5rem 3rem;
+}
+
+/* Tables */
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin: 0.75rem 0 1.5rem;
+}
+
+/*
+ * Wraps a wide table (loan/customer/log lists - 4-6 columns, too many to
+ * meaningfully narrow) so it can scroll horizontally on its own without
+ * the page itself ever needing to. The border/radius/margin live on this
+ * wrapper, not the inner table, on purpose: an earlier pass put
+ * `overflow-x: auto` directly on the <table> element, and MariaDB^H^H
+ * rather, `border-collapse: collapse` interacting with `overflow` on the
+ * table's own box clipped its border unpredictably once scrolled - it
+ * read as the table having no visible edge, like the content just ran
+ * off with nothing containing it. A dedicated wrapper's border stays put
+ * on its own box regardless of the inner table's scroll position, so the
+ * whole thing still reads as one bounded, deliberate component instead
+ * of something spilling off the screen. `overflow: hidden` + `overflow-x:
+ * auto` (not `overflow-x: auto` alone) keeps the vertical clip needed for
+ * the rounded corners while still allowing horizontal scroll - the same
+ * pairing the plain `table` rule above already relies on, just on the
+ * wrapper instead of the table now that the two are split apart.
+ */
+.table-scroll {
+    overflow: hidden;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    margin: 0.75rem 0 1.5rem;
+    /*
+     * Without this, the horizontal scrollbar this wrapper introduces
+     * renders in the browser's own default (light-themed) scrollbar
+     * style regardless of this app's own theme - caught only by
+     * actually looking at a dark-mode screenshot: a bright white bar
+     * sitting across an otherwise near-black table, the same class of
+     * "looks broken, isn't just unstyled" mistake as the earlier
+     * unstyled-<input type="submit">-logout-button and invisible-dark-
+     * mode-toggle-label bugs this redesign already hit once each.
+     */
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) var(--color-surface);
+}
+
+.table-scroll table {
+    border: none;
+    border-radius: 0;
+    margin: 0;
+}
+
+th, td {
+    text-align: left;
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.92rem;
+}
+
+th {
+    background: var(--color-primary-light);
+    font-weight: 700;
+    color: var(--color-primary);
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+}
+
+[data-theme="dark"] th {
+    color: var(--color-accent);
+}
+
+tbody tr:nth-child(even) {
+    background: rgba(92, 70, 48, 0.035);
+}
+
+tbody tr:last-child td {
+    border-bottom: none;
+}
+
+tbody tr:hover {
+    background: var(--color-primary-light);
+}
+
+/*
+ * yii\widgets\LinkPager's default markup (<ul class="pagination"> of
+ * <li><a>) had no styling anywhere in this stylesheet, so every list
+ * using pagination (loans, customers, the audit/access logs) fell back
+ * to the browser's own default bulleted-list rendering - indented,
+ * disc markers, no visual relationship to the table it belongs to.
+ * Rebuilt as a plain row of small rectangular buttons matching this
+ * app's own badge/button shapes, sitting directly under the table it
+ * paginates instead of floating disconnected below it.
+ */
+.pagination {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    list-style: none;
+    margin: 0 0 1.5rem;
+    padding: 0;
+}
+
+.pagination li {
+    margin: 0;
+}
+
+.pagination a,
+.pagination span {
+    display: block;
+    min-width: 2.1rem;
+    padding: 0.35rem 0.55rem;
+    text-align: center;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    font-size: 0.85rem;
+}
+
+.pagination a:hover {
+    background: var(--color-primary-light);
+    text-decoration: none;
+}
+
+.pagination .active a {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-header-text);
+}
+
+.pagination .disabled span {
+    color: var(--color-muted);
+    opacity: 0.5;
+}
+
+/* Log view's month/year group-header rows - a section divider, not a
+   repeat of the column header row it sits below */
+.log-group-row th {
+    background: var(--color-bg);
+    color: var(--color-text);
+    text-transform: none;
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    font-size: 0.95rem;
+    letter-spacing: normal;
+    padding-top: 0.9rem;
+}
+
+.log-group-row:hover {
+    background: transparent;
+}
+
+td ul {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.85rem;
+}
+
+td ul li {
+    margin-bottom: 0.15rem;
+}
+
+/* Forms */
+
+form {
+    margin: 0.75rem 0 1.5rem;
+}
+
+label {
+    display: block;
+    margin-bottom: 0.9rem;
+    font-size: 0.87rem;
+    font-weight: 600;
+    color: var(--color-muted);
+}
+
+label > input,
+label > select,
+label > textarea {
+    display: block;
+    margin-top: 0.3rem;
+    color: var(--color-text);
+    font-size: 0.9rem;
+    font-weight: 400;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+input[type="tel"],
+input[type="file"],
+select,
+textarea {
+    width: 100%;
+    max-width: 360px;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: inherit;
+}
+
+input[type="file"] {
+    padding: 0.4rem;
+    max-width: 420px;
+}
+
+input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+    accent-color: var(--color-primary);
+    cursor: pointer;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(92, 70, 48, 0.16);
+}
+
+[data-theme="dark"] input:focus,
+[data-theme="dark"] select:focus,
+[data-theme="dark"] textarea:focus {
+    box-shadow: 0 0 0 3px rgba(207, 165, 104, 0.22);
+}
+
+textarea {
+    max-width: 480px;
+    min-height: 4.5rem;
+}
+
+button, input[type="submit"], .btn {
+    display: inline-block;
+    background: var(--color-primary);
+    color: var(--color-header-text);
+    border: none;
+    padding: 0.55rem 1.15rem;
+    border-radius: var(--radius-sm);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.01em;
+}
+
+button:hover, input[type="submit"]:hover, .btn:hover {
+    background: var(--color-primary-dark);
+    text-decoration: none;
+}
+
+/*
+ * Dark near-black text on the primary solid-fill buttons (Login,
+ * Create loan, ...) in dark mode - their background is a light
+ * gold/tan there, so light text (this app's default button color)
+ * would be nearly invisible on it. Explicitly excludes the header's
+ * own buttons (Logout, the theme toggle) via the `:not()` list - those
+ * are transparent "ghost" buttons on the header's own dark background,
+ * not solid-fill, and need their light text color kept. Caught by
+ * actually looking at a rendered screenshot in dark mode, not by
+ * reading the CSS: without the exclusion this rule's selector also
+ * matches header button/header input[type="submit"], which made
+ * "Logout" and the theme toggle's own label render as dark-brown text
+ * on a near-black background - present in the DOM, essentially
+ * invisible on screen.
+ */
+[data-theme="dark"] button:not(.theme-toggle):not(header button),
+[data-theme="dark"] input[type="submit"]:not(header input[type="submit"]),
+[data-theme="dark"] .btn {
+    color: #221a10;
+}
+
+/* Flash messages */
+
+.flash-success, .flash-error {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.7rem 1rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    border-left-width: 3px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.flash-success {
+    background: var(--color-success-bg);
+    color: var(--color-success-text);
+    border-color: var(--color-success-border);
+    border-left-color: var(--color-success-text);
+}
+
+.flash-error {
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+    border-color: var(--color-error-border);
+    border-left-color: var(--color-error-text);
+}
+
+/* Status badges (loan status) - small rectangular tags, not pills */
+
+.badge {
+    display: inline-block;
+    padding: 0.18rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.badge-active {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+}
+
+[data-theme="dark"] .badge-active {
+    color: var(--color-accent);
+}
+
+.badge-overdue {
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+}
+
+.badge-completed {
+    background: var(--color-success-bg);
+    color: var(--color-success-text);
+}
+
+.badge-cancelled {
+    background: #ece5d5;
+    color: var(--color-muted);
+}
+
+/* Dashboard stat figures - a divided typographic row, not boxed cards */
+
+/*
+ * Groups the dashboard's stats into named categories ("Loans",
+ * "Collections") rather than one flat row/column of four unrelated-
+ * looking figures - on a narrow screen especially, four stacked
+ * numbers with no label above them read as one undifferentiated list
+ * rather than two pairs of related figures. Each group is its own
+ * bordered `.stats` row underneath a small italic label, one visual
+ * step below the `<h2>` treatment "Staff performance" already uses -
+ * so the page reads as three named sections (Loans, Collections,
+ * Staff performance), not one undifferentiated block followed by a
+ * table.
+ */
+.stat-group {
+    margin-top: 1.5rem;
+}
+
+.stat-group:first-child {
+    margin-top: 1rem;
+}
+
+.stat-group-label {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--color-accent);
+    margin: 0 0 0.4rem;
+}
+
+.stats {
+    display: flex;
+    flex-wrap: wrap;
+    margin: 0;
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.stat-tile {
+    flex: 1;
+    min-width: 160px;
+    padding: 1rem 1.25rem;
+    border-right: 1px solid var(--color-border);
+}
+
+.stat-tile:last-child {
+    border-right: none;
+}
+
+.stat-tile .stat-label {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--color-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.35rem;
+}
+
+.stat-tile .stat-value {
+    display: block;
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    font-size: 1.55rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+}
+
+.stat-tile--primary .stat-value { color: var(--color-primary); }
+[data-theme="dark"] .stat-tile--primary .stat-value { color: var(--color-accent); }
+.stat-tile--warning .stat-value { color: var(--color-error-text); }
+.stat-tile--success .stat-value { color: var(--color-success-text); }
+
+/* Auth pages (login, and the guest landing page) */
+
+.auth-page {
+    min-height: calc(100vh - 4rem);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.auth-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    padding: 2.25rem 2.25rem 1.9rem;
+    width: 100%;
+    max-width: 360px;
+}
+
+.auth-card h1 {
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.auth-card p {
+    text-align: center;
+    margin-bottom: 1.25rem;
+}
+
+.auth-card form {
+    margin: 0;
+}
+
+.auth-card button, .auth-card .btn {
+    width: 100%;
+    text-align: center;
+}
+
+.auth-error {
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+    border: 1px solid var(--color-error-border);
+    border-left-width: 3px;
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.85rem;
+    font-size: 0.87rem;
+    margin-bottom: 1.1rem;
+    list-style: none;
+}
+
+/* Small inline helpers */
+
+.muted {
+    color: var(--color-muted);
+    font-size: 0.9rem;
+}
+
+.inline-form {
+    display: inline-block;
+    margin: 0;
+}
+
+.theme-toggle {
+    background: transparent;
+    border: 1px solid rgba(241, 230, 210, 0.3);
+    color: var(--color-header-text);
+    padding: 0.4rem 0.8rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.87rem;
+}
+
+.theme-toggle:hover {
+    background: rgba(241, 230, 210, 0.08);
+    border-color: rgba(241, 230, 210, 0.5);
+}
+
+/*
+ * Menu button for the phone-width header (see the @media block below for
+ * what it actually shows/hides) - hidden here unconditionally so it
+ * never appears above the 640px breakpoint, where the nav/user-chip/
+ * logout/theme-toggle it controls are never hidden in the first place.
+ * A plain three-bar icon rather than a text label ("Menu") since header
+ * space is exactly what's tight on the screens this button exists for.
+ */
+.nav-toggle {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    width: 2.1rem;
+    height: 2.1rem;
+    padding: 0;
+    background: transparent;
+    border: 1px solid rgba(241, 230, 210, 0.3);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.nav-toggle:hover {
+    background: rgba(241, 230, 210, 0.08);
+    border-color: rgba(241, 230, 210, 0.5);
+}
+
+.nav-toggle-bar {
+    display: block;
+    width: 1.1rem;
+    height: 2px;
+    margin: 0 auto;
+    background: var(--color-header-text);
+}
+
+/*
+ * Phone-width layout. This is a web app used on Android in a browser
+ * (no native shell, no fixed viewport) - staff pull it up on their own
+ * phones as often as a desktop, so the fixed-width assumptions above
+ * (1.5rem side padding, a table that just lays out at its natural
+ * width, a divided horizontal stat row) need a narrow-viewport variant
+ * rather than relying on the browser to shrink everything uniformly.
+ * One breakpoint is enough here - there's no tablet-specific layout in
+ * this app worth a second one.
+ *
+ * Tables (loan/customer/log lists, several with 5-6 columns including
+ * a free-text "Changes" column) are the one thing that cannot just
+ * reflow to a narrower column: shrinking table text below something
+ * readable is worse than letting the table scroll sideways within its
+ * own row. `display: block` on <table> only changes the table
+ * element's own box to a block, scrollable one - its thead/tbody/tr/td
+ * children keep their table-row-group/table-row/table-cell defaults
+ * from the UA stylesheet regardless of the parent's display, so the
+ * table still lays out and renders exactly as before, just inside a
+ * horizontally scrollable strip instead of overflowing the page itself.
+ * No white-space: nowrap is added, so cells that read better wrapped
+ * (the audit log's Changes list) still wrap instead of forcing a much
+ * wider scroll area.
+ */
+@media (max-width: 640px) {
+    header {
+        padding: 0.65rem 1rem;
+        gap: 0.6rem;
+    }
+
+    main {
+        padding: 1.25rem 1rem 2.5rem;
+    }
+
+    h1 {
+        font-size: 1.4rem;
+    }
+
+    th, td {
+        padding: 0.55rem 0.65rem;
+        font-size: 0.87rem;
+    }
+
+    .stats {
+        flex-direction: column;
+        border-top: none;
+    }
+
+    .stat-tile {
+        border-right: none;
+        border-top: 1px solid var(--color-border);
+        padding: 0.85rem 0.25rem;
+    }
+
+    .stat-tile:first-child {
+        border-top: none;
+    }
+
+    .auth-card {
+        padding: 1.75rem 1.5rem 1.5rem;
+        max-width: 100%;
+    }
+
+    .auth-page {
+        padding: 0 1rem;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="number"],
+    input[type="date"],
+    input[type="tel"],
+    input[type="file"],
+    select,
+    textarea {
+        max-width: 100%;
+    }
+
+    /*
+     * Below this breakpoint the nav links, user chip, logout form and
+     * theme toggle are exactly the four things that used to wrap onto
+     * several separate visible rows under the brand (still fine on a
+     * wide screen, where they all fit in one row - this block only
+     * ever applies inside the same max-width: 640px query as the rest
+     * of the phone layout). Collapsed behind #nav-toggle instead,
+     * revealed as one stacked panel via the .nav-open class the
+     * layout's own inline script toggles on <header>.
+     */
+    .nav-toggle {
+        display: flex;
+    }
+
+    header nav,
+    header .user-chip,
+    header form,
+    header .theme-toggle {
+        display: none;
+    }
+
+    header.nav-open nav,
+    header.nav-open .user-chip,
+    header.nav-open form,
+    header.nav-open .theme-toggle {
+        display: block;
+        width: 100%;
+    }
+
+    header.nav-open nav {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+        margin-right: 0;
+    }
+
+    header.nav-open nav a {
+        padding: 0.65rem 0.5rem;
+        border-top: 1px solid rgba(241, 230, 210, 0.12);
+    }
+
+    header.nav-open .user-chip {
+        padding: 0.5rem;
+    }
+
+    /* form's own width:100% above doesn't reach the button inside it -
+       button/input[type=submit] size to their own content by default
+       (see the shared rule near the top of this file), so without this
+       Logout stays its natural small width while Dark mode (not inside
+       a form) already fills the row via its own width:100% rule. */
+    header.nav-open form button {
+        width: 100%;
+    }
+}

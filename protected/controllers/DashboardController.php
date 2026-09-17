@@ -59,8 +59,7 @@ class DashboardController extends Controller
             throw new NotFoundHttpException('Staff member not found.');
         }
 
-        $adminIds = array_map('intval', Yii::$app->authManager->getUserIdsByRole(User::ROLE_ADMIN));
-        if (in_array((int) $staff->id, $adminIds, true)) {
+        if (in_array((int) $staff->id, User::adminIds(), true)) {
             throw new ForbiddenHttpException('Admin accounts are not tracked in staff performance.');
         }
 

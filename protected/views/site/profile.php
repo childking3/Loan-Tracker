@@ -12,11 +12,7 @@ $this->title = 'My account';
 
 <?= $this->render('//_flashes') ?>
 
-<?php if ($model->avatar_filename): ?>
-    <img class="avatar avatar-large" src="<?= Html::encode(Url::to(['avatar/view', 'id' => $model->id, 'v' => $model->avatar_filename])) ?>" alt="">
-<?php else: ?>
-    <span class="avatar avatar-large avatar-placeholder"><?= Html::encode(mb_strtoupper(mb_substr($model->full_name, 0, 1))) ?></span>
-<?php endif; ?>
+<?= $this->render('//_avatar', ['model' => $model, 'imgClass' => 'avatar avatar-large', 'placeholderClass' => 'avatar avatar-large avatar-placeholder']) ?>
 
 <p>Username: <?= Html::encode($model->username) ?></p>
 <p>Full name: <?= Html::encode($model->full_name) ?></p>

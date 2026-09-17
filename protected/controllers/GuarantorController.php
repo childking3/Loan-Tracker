@@ -49,9 +49,9 @@ class GuarantorController extends Controller
             throw new NotFoundHttpException('Loan not found.');
         }
 
-        // Mirrors RepaymentController's own status guard - a guarantor
-        // only makes sense while the loan is still open.
-        if (!in_array($loan->status, ['active', 'overdue'], true)) {
+        // Loan::isOpenForActivity() - a guarantor only makes sense while
+        // the loan is still open, same rule RepaymentController applies.
+        if (!$loan->isOpenForActivity()) {
             Yii::$app->session->setFlash('error', 'Guarantors can only be added to active or overdue loans.');
             return $this->redirect(['loan/view', 'id' => $loan->id]);
         }
@@ -66,6 +66,11 @@ class GuarantorController extends Controller
             // lock on the loan plus a short window rejecting an identical
             // name+phone guarantor added in the last 10 seconds. Short,
             // not permanent - a legitimate re-add later must not be blocked.
+            //
+            // One of 3 near-identical copies of this pattern (see
+            // RepaymentController::actionCreate()'s own comment for the
+            // full duplicate-function-scan note and why it's left
+            // unconsolidated).
             $duplicate = false;
             $transaction = Yii::$app->db->beginTransaction();
             try {

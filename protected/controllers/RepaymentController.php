@@ -55,16 +55,17 @@ class RepaymentController extends Controller
             throw new NotFoundHttpException('Loan not found.');
         }
 
-        if (!Yii::$app->user->can('viewAllLoans') && !Yii::$app->user->can('viewAssignedLoans', ['loan' => $loan])) {
+        if (!$loan->isVisibleToCurrentUser()) {
             throw new ForbiddenHttpException('You are not allowed to record repayments on this loan.');
         }
 
-        // 'overdue' included alongside 'active': without it, an overdue
-        // loan could never receive another repayment (nothing else ever
-        // moves a loan back out of 'overdue'), a permanent dead end. The
-        // pay-off logic below doesn't care what the prior status was, so
-        // widening this check is sufficient on its own.
-        if (!in_array($loan->status, ['active', 'overdue'], true)) {
+        // 'overdue' included alongside 'active' (see Loan::isOpenForActivity()):
+        // without it, an overdue loan could never receive another repayment
+        // (nothing else ever moves a loan back out of 'overdue'), a
+        // permanent dead end. The pay-off logic below doesn't care what
+        // the prior status was, so widening this check is sufficient on
+        // its own.
+        if (!$loan->isOpenForActivity()) {
             Yii::$app->session->setFlash('error', 'Repayments can only be recorded on active or overdue loans.');
             return $this->redirect(['loan/view', 'id' => $loan->id]);
         }
@@ -100,6 +101,21 @@ class RepaymentController extends Controller
             // few seconds - a short window, not permanent, since two
             // genuine same-day payments (e.g. installments) must not be
             // blocked.
+            //
+            // Flagged by the 2026-09-17 duplicate-function scan as the
+            // same shape repeated 3x - here, LoanController::actionCreate()
+            // and GuarantorController::actionCreate() (row lock on a
+            // parent row, then a short-window exists() check on a
+            // per-entity field set, then save+audit inside one
+            // transaction). Deliberately left unconsolidated for now: the
+            // lock table (customer vs loan), the exists() field set (loan+
+            // package+staff vs loan+amount+date+staff vs loan+name+phone)
+            // and the flash-message copy all differ per entity, and this
+            // is concurrency-safety code - a shared
+            // runGuardedAgainstDuplicate(lockTable, lockId, duplicateQuery,
+            // save) helper is the obvious shape but getting the lock/
+            // rollback semantics exactly right for all three callers needs
+            // its own careful pass rather than folding into a broader scan.
             $duplicate = false;
             $transaction = Yii::$app->db->beginTransaction();
             try {

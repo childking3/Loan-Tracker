@@ -3,6 +3,7 @@
 namespace app\controllers;
 
 use app\components\AuditLogger;
+use app\components\NavMenu;
 use app\models\LoginForm;
 use app\models\User;
 use Yii;
@@ -25,7 +26,7 @@ class SiteController extends Controller
                         'roles' => ['?'],
                     ],
                     [
-                        'actions' => ['logout', 'profile'],
+                        'actions' => ['logout', 'profile', 'more'],
                         'allow' => true,
                         'roles' => ['@'],
                     ],
@@ -130,6 +131,18 @@ class SiteController extends Controller
         }
 
         return $this->render('profile', ['model' => $model]);
+    }
+
+    /**
+     * The 4th bottom-nav tab for anyone with more than one secondary item
+     * (see NavMenu::secondaryItems()) - reachable by direct navigation
+     * regardless of how many items that resolves to for the current user,
+     * even though the bottom-nav itself only ever links here when there's
+     * more than one (a single item goes straight on the tab instead).
+     */
+    public function actionMore()
+    {
+        return $this->render('more', ['items' => NavMenu::secondaryItems()]);
     }
 
     public function actionError()

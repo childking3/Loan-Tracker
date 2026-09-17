@@ -3,6 +3,7 @@
 namespace app\controllers;
 
 use app\components\CsvExporter;
+use app\helpers\RequestHelper;
 use app\models\Customer;
 use app\models\Loan;
 use app\models\Repayment;
@@ -68,16 +69,7 @@ class ReportController extends Controller
         $balances = Loan::remainingBalancesFor($pageLoans);
         $rows = array_map(fn (Customer $c) => $this->customerRow($c, $balances), $pageCustomers);
 
-        if (Yii::$app->request->get('export') === 'csv') {
-            CsvExporter::send('customers.csv', $header, $this->customerCsvRows($query));
-            return null;
-        }
-
-        return $this->render('customers', [
-            'header' => $header,
-            'rows' => $rows,
-            'dataProvider' => $dataProvider,
-        ]);
+        return $this->respond('customers', $header, $this->customerCsvRows($query), $rows, ['dataProvider' => $dataProvider]);
     }
 
     /**
@@ -90,7 +82,7 @@ class ReportController extends Controller
         $outstanding = 0.0;
         foreach ($loans as $loan) {
             $totalBorrowed += (float) $loan->principal_amount;
-            if (in_array($loan->status, ['active', 'overdue'], true)) {
+            if ($loan->isOpenForActivity()) {
                 $outstanding += $balances[(int) $loan->id] ?? 0.0;
             }
         }
@@ -132,7 +124,7 @@ class ReportController extends Controller
     {
         $status = Yii::$app->request->get('status', '');
         $query = Loan::find();
-        if (in_array($status, ['active', 'completed', 'overdue', 'cancelled'], true)) {
+        if (in_array($status, Loan::STATUSES, true)) {
             $query->andWhere(['status' => $status]);
         }
         $query->with(['customer', 'assignedStaff'])->orderBy(['created_at' => SORT_DESC]);
@@ -144,14 +136,7 @@ class ReportController extends Controller
         $balances = Loan::remainingBalancesFor($pageLoans);
         $rows = array_map(fn (Loan $l) => $this->loanRow($l, $balances), $pageLoans);
 
-        if (Yii::$app->request->get('export') === 'csv') {
-            CsvExporter::send('loans.csv', $header, $this->loanCsvRows($query));
-            return null;
-        }
-
-        return $this->render('loans', [
-            'header' => $header,
-            'rows' => $rows,
+        return $this->respond('loans', $header, $this->batchedLoanCsvRows($query, [$this, 'loanRow']), $rows, [
             'dataProvider' => $dataProvider,
             'filters' => ['status' => $status],
         ]);
@@ -175,26 +160,13 @@ class ReportController extends Controller
         ];
     }
 
-    /**
-     * @return iterable<array>
-     */
-    private function loanCsvRows(ActiveQuery $query): iterable
-    {
-        foreach ($query->batch(500) as $loanBatch) {
-            $balances = Loan::remainingBalancesFor($loanBatch);
-            foreach ($loanBatch as $loan) {
-                yield $this->loanRow($loan, $balances);
-            }
-        }
-    }
-
     public function actionRepayments()
     {
         [$from, $to, $query] = $this->dateRangeQuery(
             Repayment::find(),
             'payment_date',
-            $this->scalarGet('from'),
-            $this->scalarGet('to')
+            RequestHelper::scalarGet('from'),
+            RequestHelper::scalarGet('to')
         );
         $query->with(['loan.customer', 'recordedByStaff'])->orderBy(['payment_date' => SORT_DESC, 'created_at' => SORT_DESC]);
 
@@ -202,14 +174,7 @@ class ReportController extends Controller
         $dataProvider = new ActiveDataProvider(['query' => $query, 'pagination' => ['pageSize' => 50]]);
         $rows = array_map([$this, 'repaymentRow'], $dataProvider->getModels());
 
-        if (Yii::$app->request->get('export') === 'csv') {
-            CsvExporter::send('repayments.csv', $header, $this->repaymentCsvRows($query));
-            return null;
-        }
-
-        return $this->render('repayments', [
-            'header' => $header,
-            'rows' => $rows,
+        return $this->respond('repayments', $header, $this->repaymentCsvRows($query), $rows, [
             'dataProvider' => $dataProvider,
             'filters' => ['from' => $from, 'to' => $to],
         ]);
@@ -250,7 +215,7 @@ class ReportController extends Controller
     {
         $query = Loan::find()
             ->with(['customer', 'assignedStaff'])
-            ->andWhere(['in', 'status', ['active', 'overdue']])
+            ->andWhere(['in', 'status', Loan::OPEN_STATUSES])
             ->andWhere('total_repayment - COALESCE((SELECT SUM(amount) FROM {{%repayment}} WHERE loan_id = {{%loan}}.id), 0) > 0');
 
         $header = ['Loan Number', 'Customer', 'Status', 'Remaining Balance', 'Expected Completion', 'Assigned Staff'];
@@ -260,16 +225,7 @@ class ReportController extends Controller
         $balances = Loan::remainingBalancesFor($pageLoans);
         $rows = array_map(fn (Loan $l) => $this->outstandingRow($l, $balances), $pageLoans);
 
-        if (Yii::$app->request->get('export') === 'csv') {
-            CsvExporter::send('outstanding.csv', $header, $this->outstandingCsvRows($query));
-            return null;
-        }
-
-        return $this->render('outstanding', [
-            'header' => $header,
-            'rows' => $rows,
-            'dataProvider' => $dataProvider,
-        ]);
+        return $this->respond('outstanding', $header, $this->batchedLoanCsvRows($query, [$this, 'outstandingRow']), $rows, ['dataProvider' => $dataProvider]);
     }
 
     /**
@@ -290,15 +246,6 @@ class ReportController extends Controller
     /**
      * @return iterable<array>
      */
-    private function outstandingCsvRows(ActiveQuery $query): iterable
-    {
-        foreach ($query->batch(500) as $loanBatch) {
-            $balances = Loan::remainingBalancesFor($loanBatch);
-            foreach ($loanBatch as $loan) {
-                yield $this->outstandingRow($loan, $balances);
-            }
-        }
-    }
 
     public function actionOverdue()
     {
@@ -311,16 +258,7 @@ class ReportController extends Controller
         $balances = Loan::remainingBalancesFor($pageLoans);
         $rows = array_map(fn (Loan $l) => $this->overdueRow($l, $balances), $pageLoans);
 
-        if (Yii::$app->request->get('export') === 'csv') {
-            CsvExporter::send('overdue.csv', $header, $this->overdueCsvRows($query));
-            return null;
-        }
-
-        return $this->render('overdue', [
-            'header' => $header,
-            'rows' => $rows,
-            'dataProvider' => $dataProvider,
-        ]);
+        return $this->respond('overdue', $header, $this->batchedLoanCsvRows($query, [$this, 'overdueRow']), $rows, ['dataProvider' => $dataProvider]);
     }
 
     /**
@@ -341,14 +279,15 @@ class ReportController extends Controller
     }
 
     /**
+     * @param callable(Loan, array<int, float>): array $rowMapper
      * @return iterable<array>
      */
-    private function overdueCsvRows(ActiveQuery $query): iterable
+    private function batchedLoanCsvRows(ActiveQuery $query, callable $rowMapper): iterable
     {
         foreach ($query->batch(500) as $loanBatch) {
             $balances = Loan::remainingBalancesFor($loanBatch);
             foreach ($loanBatch as $loan) {
-                yield $this->overdueRow($loan, $balances);
+                yield $rowMapper($loan, $balances);
             }
         }
     }
@@ -358,8 +297,8 @@ class ReportController extends Controller
         [$from, $to, $query] = $this->dateRangeQuery(
             Repayment::find(),
             'payment_date',
-            $this->scalarGet('from'),
-            $this->scalarGet('to')
+            RequestHelper::scalarGet('from'),
+            RequestHelper::scalarGet('to')
         );
 
         $data = $query
@@ -378,7 +317,8 @@ class ReportController extends Controller
             'daily-collections',
             ['Date', 'Total Collected', 'Repayment Count'],
             $rows,
-            ['from' => $from, 'to' => $to]
+            $rows,
+            ['filters' => ['from' => $from, 'to' => $to]]
         );
     }
 
@@ -390,24 +330,13 @@ class ReportController extends Controller
      */
     public function actionStaff()
     {
-        $adminIds = array_map('intval', Yii::$app->authManager->getUserIdsByRole(User::ROLE_ADMIN));
-
         // Replaces 3 queries per staff row (in a PHP loop, scaling
         // linearly with headcount) with one pass using the same
         // correlated-subquery shape as DashboardCache::computeTotals(),
         // extended with an overdue_loans subquery since this report shows
         // both.
-        $excludeAdmins = '';
-        $params = [':active' => 'active', ':overdue' => 'overdue', ':statusActive' => User::STATUS_ACTIVE];
-        if ($adminIds !== []) {
-            $placeholders = [];
-            foreach ($adminIds as $index => $adminId) {
-                $placeholder = ':admin' . $index;
-                $placeholders[] = $placeholder;
-                $params[$placeholder] = $adminId;
-            }
-            $excludeAdmins = ' AND u.id NOT IN (' . implode(',', $placeholders) . ')';
-        }
+        [$excludeAdmins, $adminParams] = User::excludeAdminsSql('u');
+        $params = array_merge([':active' => 'active', ':overdue' => 'overdue', ':statusActive' => User::STATUS_ACTIVE], $adminParams);
 
         $data = Yii::$app->db->createCommand(
             'SELECT u.full_name,
@@ -429,26 +358,38 @@ class ReportController extends Controller
             ];
         }
 
-        return $this->respond('staff', ['Staff', 'Active Loans', 'Overdue Loans', 'Total Collected'], $rows);
+        return $this->respond('staff', ['Staff', 'Active Loans', 'Overdue Loans', 'Total Collected'], $rows, $rows);
     }
 
     /**
-     * Renders the HTML report view, or exports the same rows as CSV when
-     * the request carries ?export=csv - both read the same $rows so the
-     * two outputs can never drift apart.
+     * Renders the HTML report view, or exports as CSV when the request
+     * carries ?export=csv - both read from the same underlying query so
+     * the two outputs can never drift apart.
+     *
+     * The "export=csv vs. render the HTML table" branch was copied
+     * identically in 4 actions (customers/loans/outstanding/overdue)
+     * even though this helper already existed to do exactly that -
+     * they weren't using it only because it couldn't yet pass through
+     * a `dataProvider` for their pagination. Widened to take the CSV
+     * rows (the full, unpaginated result, usually a batched generator)
+     * and the HTML rows (one page's worth) separately, plus
+     * `$extraViewParams` for whatever else a view needs (`dataProvider`,
+     * `filters`) instead of a single hard-coded `filters` param.
+     *
+     * @param iterable<array> $csvRows
+     * @param array<array> $htmlRows
      */
-    private function respond(string $view, array $header, array $rows, array $filters = [])
+    private function respond(string $view, array $header, iterable $csvRows, array $htmlRows, array $extraViewParams = [])
     {
         if (Yii::$app->request->get('export') === 'csv') {
-            CsvExporter::send($view . '.csv', $header, $rows);
+            CsvExporter::send($view . '.csv', $header, $csvRows);
             return null;
         }
 
-        return $this->render($view, [
+        return $this->render($view, array_merge([
             'header' => $header,
-            'rows' => $rows,
-            'filters' => $filters,
-        ]);
+            'rows' => $htmlRows,
+        ], $extraViewParams));
     }
 
     /**
@@ -464,18 +405,5 @@ class ReportController extends Controller
         }
 
         return [$from, $to, $query];
-    }
-
-    /**
-     * A query string like ?from[]=x makes request->get() return an array,
-     * which dateRangeQuery()'s typed string $from can't accept - an
-     * uncaught TypeError otherwise. Same non-scalar guard
-     * CustomerController::actionIndex() uses for its own ?q[]=x case:
-     * treat it as no filter rather than erroring.
-     */
-    private function scalarGet(string $param): string
-    {
-        $value = Yii::$app->request->get($param, '');
-        return is_string($value) ? $value : '';
     }
 }

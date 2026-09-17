@@ -6,14 +6,13 @@
 /** @var array $countsByStatus */
 /** @var float $totalCollected */
 
+use app\helpers\Badge;
 use app\helpers\Currency;
 use yii\helpers\Html;
 
 $this->title = $staff->full_name;
 
-$visibleLoans = array_values(array_filter($loans, function ($loan) {
-    return \Yii::$app->user->can('viewAllLoans') || \Yii::$app->user->can('viewAssignedLoans', ['loan' => $loan]);
-}));
+$visibleLoans = array_values(array_filter($loans, fn ($loan) => $loan->isVisibleToCurrentUser()));
 ?>
 <h1><?= Html::encode($staff->full_name) ?></h1>
 
@@ -84,7 +83,7 @@ $visibleLoans = array_values(array_filter($loans, function ($loan) {
             <tr>
                 <td><?= Html::a(Html::encode($loan->loan_number), ['loan/view', 'id' => $loan->id]) ?></td>
                 <td><?= Html::a(Html::encode($loan->customer->full_name), ['customer/view', 'id' => $loan->customer_id]) ?></td>
-                <td><span class="badge badge-<?= Html::encode($loan->status) ?>"><?= Html::encode($loan->status) ?></span></td>
+                <td><?= Badge::status($loan->status) ?></td>
                 <td><?= Html::encode(Currency::format($loan->principal_amount)) ?></td>
                 <td><?= Html::encode(Currency::format($loan->getRemainingBalance())) ?></td>
                 <td><?= Html::encode($loan->start_date) ?></td>

@@ -5,6 +5,7 @@
 /** @var string $status */
 /** @var string $search */
 
+use app\helpers\Badge;
 use yii\helpers\Html;
 use yii\widgets\LinkPager;
 
@@ -47,7 +48,7 @@ $this->title = 'Loans';
         <tr>
             <td><?= Html::encode($loan->loan_number) ?></td>
             <td><?= Html::encode($loan->customer->full_name) ?></td>
-            <td><span class="badge badge-<?= Html::encode($loan->status) ?>"><?= Html::encode($loan->status) ?></span></td>
+            <td><?= Badge::status($loan->status) ?></td>
             <td><?= Html::encode($loan->assignedStaff->full_name) ?></td>
             <td><?= Html::encode($loan->start_date) ?></td>
             <td><?= Html::a('View', ['loan/view', 'id' => $loan->id]) ?></td>

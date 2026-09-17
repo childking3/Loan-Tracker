@@ -2,65 +2,60 @@
 
 /** @var \yii\web\View $this */
 /** @var \app\models\User $model */
+/** @var bool $canManageAllRoles */
 
 use app\models\User;
 use yii\helpers\Html;
 
 $this->title = 'Edit ' . $model->full_name;
 ?>
-<h1>Edit staff account</h1>
+<div class="page-header-row">
+    <h1>Edit Staff Account</h1>
+    <?= Html::a('<svg class="icon" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> Back to Staff', ['user/index'], ['class' => 'btn-icon']) ?>
+</div>
 
-<?php foreach ($model->getErrors() as $errors): ?>
-    <?php foreach ($errors as $error): ?>
-        <div><?= Html::encode($error) ?></div>
-    <?php endforeach; ?>
-<?php endforeach; ?>
+<?= $this->render('//_error_list', ['model' => $model]) ?>
 
-<?= Html::beginForm('', 'post', ['enctype' => 'multipart/form-data']) ?>
+<?= Html::beginForm('', 'post', ['enctype' => 'multipart/form-data', 'style' => 'max-width: 480px;']) ?>
     <?php if ($model->avatar_filename): ?>
         <div>
             <img class="avatar avatar-large" src="<?= Html::encode(\yii\helpers\Url::to(['avatar/view', 'id' => $model->id, 'v' => $model->avatar_filename])) ?>" alt="">
         </div>
     <?php endif; ?>
-    <div>
-        <label>
-            Profile picture
-            <?= Html::fileInput('User[avatarFile]') ?>
-        </label>
-        <?php if ($model->avatar_filename): ?>
-            <p>Leave blank to keep the current picture.</p>
-        <?php endif; ?>
-    </div>
-    <div>
-        <?= Html::activeLabel($model, 'full_name') ?>
+    <label>Profile picture
+        <?= Html::fileInput('User[avatarFile]') ?>
+    </label>
+    <?php if ($model->avatar_filename): ?>
+        <p class="muted" style="margin-top: -0.6rem;">Leave blank to keep the current picture.</p>
+    <?php endif; ?>
+    <label><?= Html::encode($model->getAttributeLabel('full_name')) ?>
         <?= Html::activeTextInput($model, 'full_name') ?>
-    </div>
-    <div>
-        <?= Html::activeLabel($model, 'username') ?>
+    </label>
+    <label><?= Html::encode($model->getAttributeLabel('username')) ?>
         <?= Html::activeTextInput($model, 'username') ?>
-    </div>
-    <div>
-        <?= Html::activeLabel($model, 'email') ?>
+    </label>
+    <label><?= Html::encode($model->getAttributeLabel('email')) ?>
         <?= Html::activeInput('email', $model, 'email') ?>
-    </div>
-    <div>
-        <?= Html::activeLabel($model, 'password', ['label' => 'New password']) ?>
+    </label>
+    <label>New password
         <?= Html::activeInput('password', $model, 'password') ?>
-        <p>Leave blank to keep the current password.</p>
-    </div>
-    <div>
-        <?= Html::activeLabel($model, 'role') ?>
-        <?= Html::activeDropDownList($model, 'role', array_combine(User::ROLES, User::ROLES)) ?>
-    </div>
-    <div>
-        <?= Html::activeLabel($model, 'status') ?>
+    </label>
+    <p class="muted" style="margin-top: -0.6rem;">Leave blank to keep the current password.</p>
+    <label>Role
+        <?php if ($canManageAllRoles): ?>
+            <?= Html::activeDropDownList($model, 'role', array_combine(User::ROLES, User::ROLES)) ?>
+        <?php else: ?>
+            <input type="text" value="Staff" disabled>
+            <?= Html::activeHiddenInput($model, 'role', ['value' => User::ROLE_STAFF]) ?>
+            <p class="muted" style="margin-top: 0.3rem;">As a manager, you can't change an account's role above staff - the server also enforces this regardless of what's submitted here.</p>
+        <?php endif; ?>
+    </label>
+    <label>Status
         <?= Html::activeDropDownList($model, 'status', [
             User::STATUS_ACTIVE => 'Active',
             User::STATUS_INACTIVE => 'Deactivated',
         ]) ?>
-    </div>
+    </label>
 
-    <div>
-        <?= Html::submitButton('Save') ?>
-    </div>
+    <?= Html::submitButton('Save') ?>
 <?= Html::endForm() ?>

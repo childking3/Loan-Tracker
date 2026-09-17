@@ -25,6 +25,15 @@ use yii\db\ActiveRecord;
  */
 class Loan extends ActiveRecord
 {
+    /**
+     * Every value the `status` enum column accepts. Was previously
+     * copied as a literal array in both LoanController::actionIndex()
+     * and ReportController::actionLoans() for validating a posted
+     * `?status=` filter - consolidated here after a duplicate-code scan
+     * found both copies.
+     */
+    public const STATUSES = ['active', 'completed', 'overdue', 'cancelled'];
+
     public static function tableName(): string
     {
         return '{{%loan}}';
@@ -51,10 +60,10 @@ class Loan extends ActiveRecord
     }
 
     /**
-     * The create form's dropdown (LoanController::staffOptions()) only
-     * offers staff-role users, but that alone doesn't stop a manager/admin
-     * from POSTing another manager/admin's id directly - the prior 'exist'
-     * rule only confirms the id belongs to *some* user, not a staff one.
+     * The create form's dropdown (User::activeStaffOptions()) only offers
+     * staff-role users, but that alone doesn't stop a manager/admin from
+     * POSTing another manager/admin's id directly - the prior 'exist' rule
+     * only confirms the id belongs to *some* user, not a staff one.
      */
     public function validateIsStaff(string $attribute): void
     {
@@ -62,8 +71,7 @@ class Loan extends ActiveRecord
             return;
         }
 
-        $staffIds = Yii::$app->authManager->getUserIdsByRole(User::ROLE_STAFF);
-        if (!in_array((string) $this->$attribute, array_map('strval', $staffIds), true)) {
+        if (!User::isStaffId($this->$attribute !== null ? (int) $this->$attribute : null)) {
             $this->addError($attribute, 'Assigned staff must be an active staff-role account.');
         }
     }
@@ -86,6 +94,46 @@ class Loan extends ActiveRecord
     public function getGuarantors(): ActiveQuery
     {
         return $this->hasMany(Guarantor::class, ['loan_id' => 'id']);
+    }
+
+    /**
+     * Whether this loan is still "open" - the only two statuses that may
+     * ever receive a new repayment or guarantor. Consolidated from two
+     * identical copies (RepaymentController::actionCreate(),
+     * GuarantorController::actionCreate()) found during a duplicate-code
+     * scan - each controller still writes its own flash message text,
+     * since "Repayments"/"Guarantors can only be added to..." are
+     * genuinely different strings, only the underlying predicate was
+     * duplicated. A later, wider scan found the same literal
+     * `['active', 'overdue']` pair in 4 more places (ReportController,
+     * DashboardCache, loan/view.php x2, customer/view.php) that predate
+     * this method entirely - all now route through here (or
+     * OPEN_STATUSES below, for the two that build a SQL `IN (...)`
+     * condition rather than checking one loan instance).
+     */
+    public const OPEN_STATUSES = ['active', 'overdue'];
+
+    public function isOpenForActivity(): bool
+    {
+        return in_array($this->status, self::OPEN_STATUSES, true);
+    }
+
+    /**
+     * Whether the current logged-in user may view this specific loan -
+     * true for anyone holding viewAllLoans, or the loan's own assigned
+     * staff member (IsAssignedStaffRule, via viewAssignedLoans). This
+     * exact composition was being hand-copied at every call site
+     * (LoanController::actionView()/actionIndex()'s repayment-permission
+     * check, RepaymentController::actionCreate(), and the loan-visibility
+     * filters in dashboard/staff.php and customer/view.php) - centralized
+     * here after the same drift already produced two real bugs found and
+     * fixed independently (a staff member seeing, in their dashboard and
+     * a customer's page, loans they had no access to open), rather than
+     * risk a sixth hand-copy silently composing the check wrong.
+     */
+    public function isVisibleToCurrentUser(): bool
+    {
+        return Yii::$app->user->can('viewAllLoans') || Yii::$app->user->can('viewAssignedLoans', ['loan' => $this]);
     }
 
     /**

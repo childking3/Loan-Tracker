@@ -160,6 +160,91 @@ class User extends ActiveRecord implements IdentityInterface
         return static::findOne(['username' => $username, 'status' => self::STATUS_ACTIVE]);
     }
 
+    /**
+     * Active users holding the RBAC 'staff' role specifically, keyed by id
+     * for use as a select-input option list. Deliberately narrower than
+     * "any active user": every "assigned staff" concept in this app (loan
+     * assignment, market assignment, the staff performance report) assumes
+     * a true staff-role account, not a manager/admin one who happens to be
+     * active. Was LoanController::staffOptions() (private, loan-only);
+     * promoted here once MarketController needed the exact same query.
+     *
+     * @return array<int, string> user id => full name
+     */
+    public static function activeStaffOptions(): array
+    {
+        $staffIds = Yii::$app->authManager->getUserIdsByRole(self::ROLE_STAFF);
+        if ($staffIds === []) {
+            return [];
+        }
+
+        $options = [];
+        foreach (static::find()->andWhere(['status' => self::STATUS_ACTIVE, 'id' => $staffIds])->orderBy(['full_name' => SORT_ASC])->all() as $user) {
+            $options[$user->id] = $user->full_name;
+        }
+
+        return $options;
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    public static function adminIds(): array
+    {
+        return array_map('intval', Yii::$app->authManager->getUserIdsByRole(self::ROLE_ADMIN));
+    }
+
+    /**
+     * A ' AND <alias>.id NOT IN (...)' SQL fragment (empty string if there
+     * are no admins) plus its bound parameters, for excluding admin
+     * accounts from a raw staff-performance query. Consolidated from two
+     * identical copies (DashboardCache::computeTotals(),
+     * ReportController::actionStaff()) found during a duplicate-code
+     * scan - both built this exact placeholder loop independently.
+     * Admins are excluded from staff performance by explicit request:
+     * that table tracks loan officers doing collections, not the accounts
+     * managing them.
+     *
+     * @return array{0: string, 1: array<string, int>}
+     */
+    public static function excludeAdminsSql(string $alias = 'u'): array
+    {
+        $adminIds = self::adminIds();
+        if ($adminIds === []) {
+            return ['', []];
+        }
+
+        $params = [];
+        $placeholders = [];
+        foreach ($adminIds as $index => $adminId) {
+            $placeholder = ':admin' . $index;
+            $placeholders[] = $placeholder;
+            $params[$placeholder] = $adminId;
+        }
+
+        return [' AND ' . $alias . '.id NOT IN (' . implode(',', $placeholders) . ')', $params];
+    }
+
+    /**
+     * Whether $id belongs to a user holding the staff role - deliberately
+     * *not* filtered by active status, matching the two validators this
+     * consolidates (Loan::validateIsStaff(), Market::validateIsStaff()),
+     * which never applied that filter either. Not the same check as
+     * activeStaffOptions() for that reason - this only confirms role
+     * membership, the same thing `getUserIdsByRole()` alone has always
+     * checked here, so consolidating the two duplicates keeps their
+     * existing behavior rather than quietly tightening it.
+     */
+    public static function isStaffId(?int $id): bool
+    {
+        if ($id === null) {
+            return false;
+        }
+
+        $staffIds = Yii::$app->authManager->getUserIdsByRole(self::ROLE_STAFF);
+        return in_array((string) $id, array_map('strval', $staffIds), true);
+    }
+
     public function getId()
     {
         return $this->id;

@@ -3,6 +3,8 @@
 namespace app\controllers;
 
 use app\components\AuditLogger;
+use app\helpers\ModelFinder;
+use app\helpers\RequestHelper;
 use app\models\Customer;
 use app\models\Loan;
 use app\models\LoanPackage;
@@ -68,18 +70,16 @@ class LoanController extends Controller
         }
 
         $status = Yii::$app->request->get('status', '');
-        if (in_array($status, ['active', 'completed', 'overdue', 'cancelled'], true)) {
+        if (in_array($status, Loan::STATUSES, true)) {
             $query->andWhere(['status' => $status]);
         }
 
         // Search added on top of the RBAC-scoped $query above (AND'd
         // with assigned_staff_id for staff), so it can only narrow what
-        // they already see, never widen it. Same non-scalar-input guard
-        // as CustomerController::actionIndex()'s `q` param. Yii's `like`
-        // condition array-format parameterizes and escapes wildcards,
-        // safe against both injection and wildcard abuse.
-        $rawSearch = Yii::$app->request->get('q', '');
-        $search = trim(is_string($rawSearch) ? $rawSearch : '');
+        // they already see, never widen it. Yii's `like` condition
+        // array-format parameterizes and escapes wildcards, safe against
+        // both injection and wildcard abuse.
+        $search = trim(RequestHelper::scalarGet('q'));
         if ($search !== '') {
             $query->andWhere(['like', 'loan_number', $search]);
         }
@@ -98,7 +98,7 @@ class LoanController extends Controller
     {
         $model = $this->findModel($id);
 
-        if (!Yii::$app->user->can('viewAllLoans') && !Yii::$app->user->can('viewAssignedLoans', ['loan' => $model])) {
+        if (!$model->isVisibleToCurrentUser()) {
             throw new ForbiddenHttpException('You are not allowed to view this loan.');
         }
 
@@ -107,8 +107,7 @@ class LoanController extends Controller
             ->orderBy(['created_at' => SORT_DESC])
             ->all();
 
-        $canRecordRepayment = Yii::$app->user->can('manageRepayments')
-            && (Yii::$app->user->can('viewAllLoans') || Yii::$app->user->can('viewAssignedLoans', ['loan' => $model]));
+        $canRecordRepayment = Yii::$app->user->can('manageRepayments') && $model->isVisibleToCurrentUser();
 
         return $this->render('view', [
             'model' => $model,
@@ -149,6 +148,11 @@ class LoanController extends Controller
                 // a duplicate customer/package/staff loan created in the
                 // last 10 seconds - short, not permanent, since a genuine
                 // second same-day loan must not be blocked.
+                //
+                // One of 3 near-identical copies of this pattern (see
+                // RepaymentController::actionCreate()'s own comment for
+                // the full duplicate-function-scan note and why it's left
+                // unconsolidated).
                 $duplicate = false;
                 $transaction = Yii::$app->db->beginTransaction();
                 try {
@@ -203,7 +207,7 @@ class LoanController extends Controller
             'model' => $model,
             'customer' => $customer,
             'packageOptions' => $this->packageOptions(),
-            'staffOptions' => $this->staffOptions(),
+            'staffOptions' => User::activeStaffOptions(),
         ]);
     }
 
@@ -223,34 +227,8 @@ class LoanController extends Controller
         return $options;
     }
 
-    /**
-     * Restricted to the staff role specifically, not every active
-     * account - every other part of the app dealing with "assigned
-     * staff" (IsAssignedStaffRule, staff performance report) assumes it
-     * names an actual staff member, not a manager/admin.
-     */
-    private function staffOptions(): array
-    {
-        $staffIds = Yii::$app->authManager->getUserIdsByRole('staff');
-        if ($staffIds === []) {
-            return [];
-        }
-
-        $options = [];
-        foreach (User::find()->andWhere(['status' => User::STATUS_ACTIVE, 'id' => $staffIds])->orderBy(['full_name' => SORT_ASC])->all() as $user) {
-            $options[$user->id] = $user->full_name;
-        }
-
-        return $options;
-    }
-
     private function findModel($id): Loan
     {
-        $model = Loan::findOne($id);
-        if ($model === null) {
-            throw new NotFoundHttpException('Loan not found.');
-        }
-
-        return $model;
+        return ModelFinder::findOrFail(Loan::class, $id, 'Loan');
     }
 }

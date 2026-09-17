@@ -3,8 +3,12 @@
 namespace app\controllers;
 
 use app\components\AuditLogger;
+use app\helpers\ModelFinder;
+use app\helpers\RequestHelper;
 use app\models\Customer;
+use app\models\Guarantor;
 use app\models\Loan;
+use app\models\Market;
 use Yii;
 use yii\data\ActiveDataProvider;
 use yii\filters\AccessControl;
@@ -50,13 +54,9 @@ class CustomerController extends Controller
 
     public function actionIndex()
     {
-        $query = Customer::find()->orderBy(['full_name' => SORT_ASC]);
+        $query = Customer::find()->with('market')->orderBy(['full_name' => SORT_ASC]);
 
-        // A query string like ?q[]=x makes request->get() return an
-        // array; casting that to string throws under Yii's error handler.
-        // Treat anything non-scalar as no search term.
-        $rawSearch = Yii::$app->request->get('q', '');
-        $search = trim(is_string($rawSearch) ? $rawSearch : '');
+        $search = trim(RequestHelper::scalarGet('q'));
         if ($search !== '') {
             $query->andWhere(['or',
                 ['like', 'full_name', $search],
@@ -97,18 +97,66 @@ class CustomerController extends Controller
     public function actionCreate()
     {
         $model = new Customer();
+        // Defaulted before load(), not after - so an unmodified GET
+        // already shows the right selection, and a POST that omits the
+        // field entirely (shouldn't happen with a real <select>, but
+        // load() only overwrites keys actually present) doesn't silently
+        // null it. Picks whichever market this staff member is assigned
+        // to - if more than one (see MARKETS_REDESIGN_REVIEW.md's open
+        // item), whichever the query returns first, same tie-break used
+        // everywhere else this ambiguity already exists.
+        $assignedMarket = Market::find()->andWhere(['assigned_staff_id' => Yii::$app->user->id])->one();
+        $model->market_id = $assignedMarket->id ?? null;
+
+        $guarantor = new Guarantor();
         $duplicates = [];
 
         if ($model->load(Yii::$app->request->post())) {
+            $guarantor->load(Yii::$app->request->post());
             $confirmDuplicate = (bool) Yii::$app->request->post('confirmDuplicate');
 
-            if ($model->validate()) {
+            // Optional, per the approved design: an empty guarantor
+            // sub-form is a normal "skip this," not a validation
+            // failure - only validated at all once the user has actually
+            // started filling it in, avoiding a half-saved row either way.
+            $guarantorFilled = trim((string) $guarantor->full_name) !== ''
+                || trim((string) $guarantor->phone) !== ''
+                || trim((string) $guarantor->address) !== '';
+
+            $customerValid = $model->validate();
+            $guarantorValid = !$guarantorFilled || $guarantor->validate();
+
+            if ($customerValid && $guarantorValid) {
                 $duplicates = $model->findDuplicatesByPhone();
 
                 if ($duplicates === [] || $confirmDuplicate) {
-                    $model->created_by = Yii::$app->user->id;
-                    $model->save(false);
+                    // One form, one submit, per the mockup - both rows
+                    // saved together or not at all, mirroring
+                    // GuarantorController::actionCreate()'s own
+                    // transaction use for the same "two related writes"
+                    // shape.
+                    $transaction = Yii::$app->db->beginTransaction();
+                    try {
+                        $model->created_by = Yii::$app->user->id;
+                        $model->save(false);
+
+                        if ($guarantorFilled) {
+                            $guarantor->customer_id = $model->id;
+                            $guarantor->created_by = Yii::$app->user->id;
+                            $guarantor->save(false);
+                        }
+
+                        $transaction->commit();
+                    } catch (\Throwable $e) {
+                        $transaction->rollBack();
+                        throw $e;
+                    }
+
                     AuditLogger::audit('customer_create', 'customer', $model->id, null, $model->getAttributes());
+                    if ($guarantorFilled) {
+                        AuditLogger::audit('guarantor_create', 'guarantor', $guarantor->id, null, $guarantor->getAttributes());
+                    }
+
                     Yii::$app->session->setFlash('success', 'Customer created.');
                     return $this->redirect(['view', 'id' => $model->id]);
                 }
@@ -117,7 +165,9 @@ class CustomerController extends Controller
 
         return $this->render('create', [
             'model' => $model,
+            'guarantor' => $guarantor,
             'duplicates' => $duplicates,
+            'marketOptions' => $this->marketOptions(),
         ]);
     }
 
@@ -136,7 +186,7 @@ class CustomerController extends Controller
             return $this->redirect(['view', 'id' => $model->id]);
         }
 
-        return $this->render('update', ['model' => $model]);
+        return $this->render('update', ['model' => $model, 'marketOptions' => $this->marketOptions()]);
     }
 
     public function actionDelete($id)
@@ -181,13 +231,18 @@ class CustomerController extends Controller
         return $this->redirect(['trash']);
     }
 
-    private function findModel($id): Customer
+    private function marketOptions(): array
     {
-        $model = Customer::findOne($id);
-        if ($model === null) {
-            throw new NotFoundHttpException('Customer not found.');
+        $options = [];
+        foreach (Market::activeMarkets() as $market) {
+            $options[$market->id] = $market->name;
         }
 
-        return $model;
+        return $options;
+    }
+
+    private function findModel($id): Customer
+    {
+        return ModelFinder::findOrFail(Customer::class, $id, 'Customer');
     }
 }

@@ -7,15 +7,25 @@ use yii\db\ActiveQuery;
 use yii\db\ActiveRecord;
 
 /**
- * ActiveRecord for the guarantor table. Not a standalone entity reused
- * across loans - one row per loan, zero or more per loan.
+ * ActiveRecord for the guarantor table. Two independent uses share one
+ * table (see m260916_100000_add_customer_id_to_guarantor's docblock for
+ * why): the original per-loan guarantor (loan_id set, zero or more per
+ * loan, added from loan/view.php) and a baseline per-customer guarantor
+ * captured once at registration (customer_id set, at most one per
+ * customer by construction - CustomerController::actionCreate() is the
+ * only writer and never runs twice for the same customer - not editable
+ * afterward). A row always has exactly one of loan_id/customer_id set,
+ * enforced by a DB CHECK constraint, not just application code.
  *
- * loan_id is absent from rules(): GuarantorController::actionCreate()
- * always scopes a new guarantor to the loan in its route, never to
- * posted input, so there's nothing to validate.
+ * loan_id/customer_id are both absent from rules(): both controllers
+ * that create a guarantor always scope it to the loan/customer in their
+ * own route or freshly-created record, never to posted input, so
+ * there's nothing to validate.
  */
 class Guarantor extends ActiveRecord
 {
+    use HasContactRules;
+
     public static function tableName(): string
     {
         return '{{%guarantor}}';
@@ -30,15 +40,11 @@ class Guarantor extends ActiveRecord
 
     public function rules(): array
     {
-        return [
-            [['full_name', 'phone'], 'required'],
-            ['full_name', 'string', 'max' => 255],
-            ['phone', 'string', 'max' => 20],
-            ['phone', 'match', 'pattern' => '/^[0-9+\-\s()]{7,20}$/', 'message' => 'Enter a valid phone number.'],
+        return array_merge($this->contactRules(), [
             ['address', 'string'],
             ['relationship', 'string', 'max' => 100],
             ['occupation', 'string', 'max' => 150],
-        ];
+        ]);
     }
 
     public function attributeLabels(): array
@@ -55,5 +61,10 @@ class Guarantor extends ActiveRecord
     public function getLoan(): ActiveQuery
     {
         return $this->hasOne(Loan::class, ['id' => 'loan_id']);
+    }
+
+    public function getCustomer(): ActiveQuery
+    {
+        return $this->hasOne(Customer::class, ['id' => 'customer_id']);
     }
 }

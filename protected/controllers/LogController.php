@@ -48,6 +48,7 @@ class LogController extends Controller
             'pageTitle' => 'Audit log',
             'dataProvider' => $dataProvider,
             'entityNames' => $this->resolveEntityNames($dataProvider->getModels()),
+            'showChanges' => true,
         ]);
     }
 
@@ -59,6 +60,11 @@ class LogController extends Controller
             'pageTitle' => 'Access log',
             'dataProvider' => $dataProvider,
             'entityNames' => $this->resolveEntityNames($dataProvider->getModels()),
+            // Access rows carry nothing beyond what the Entity column
+            // already shows (a login_failed's attempted username, via the
+            // entity-column special case in the view) - no separate
+            // Changes column here, matching the mockup's 5-column table.
+            'showChanges' => false,
         ]);
     }
 
@@ -109,6 +115,7 @@ class LogController extends Controller
             'loan' => ['{{%loan}}', 'id', 'loan_number'],
             'loan_package' => ['{{%loan_package}}', 'id', 'name'],
             'guarantor' => ['{{%guarantor}}', 'id', 'full_name'],
+            'market' => ['{{%market}}', 'id', 'name'],
             'user' => ['{{%user}}', 'id', 'username'],
             'repayment' => [
                 '{{%repayment}} r LEFT JOIN {{%loan}} l ON l.id = r.loan_id',

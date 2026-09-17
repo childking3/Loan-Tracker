@@ -20,6 +20,8 @@ use yii\db\ActiveQuery;
  */
 class Customer extends ActiveRecord
 {
+    use HasContactRules;
+
     public static function tableName(): string
     {
         return '{{%customer}}';
@@ -50,13 +52,15 @@ class Customer extends ActiveRecord
 
     public function rules(): array
     {
-        return [
-            [['full_name', 'phone'], 'required'],
-            ['full_name', 'string', 'max' => 255],
-            ['phone', 'string', 'max' => 20],
-            ['phone', 'match', 'pattern' => '/^[0-9+\-\s()]{7,20}$/', 'message' => 'Enter a valid phone number.'],
+        return array_merge($this->contactRules(), [
             ['address', 'string'],
-        ];
+            // The dropdown's blank option posts '' - same default-to-null
+            // treatment as Market.assigned_staff_id, for the same reason
+            // (an optional FK, not a validation failure).
+            ['market_id', 'default', 'value' => null],
+            ['market_id', 'integer'],
+            ['market_id', 'exist', 'targetClass' => Market::class, 'targetAttribute' => 'id'],
+        ]);
     }
 
     public function attributeLabels(): array
@@ -65,7 +69,25 @@ class Customer extends ActiveRecord
             'full_name' => 'Full name',
             'phone' => 'Phone',
             'address' => 'Address',
+            'market_id' => 'Market',
         ];
+    }
+
+    public function getMarket(): ActiveQuery
+    {
+        return $this->hasOne(Market::class, ['id' => 'market_id']);
+    }
+
+    /**
+     * The baseline guarantor captured at registration (see Guarantor's
+     * own docblock) - at most one per customer by construction, so hasOne
+     * rather than hasMany even though the FK itself doesn't enforce
+     * uniqueness beyond "one row per customer_id happens to be the only
+     * one ever written".
+     */
+    public function getGuarantor(): ActiveQuery
+    {
+        return $this->hasOne(Guarantor::class, ['customer_id' => 'id']);
     }
 
     /**

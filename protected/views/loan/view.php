@@ -8,6 +8,7 @@
 /** @var \app\models\Guarantor[] $guarantors */
 /** @var bool $canManageLoan */
 
+use app\helpers\Badge;
 use app\helpers\Currency;
 use yii\helpers\Html;
 
@@ -23,7 +24,7 @@ $this->title = $model->loan_number;
 <p>Total repayment: <?= Html::encode(Currency::format($model->total_repayment)) ?></p>
 <p>Daily payment: <?= Html::encode(Currency::format($model->daily_payment)) ?></p>
 <p>Remaining balance: <?= Html::encode(Currency::format($remainingBalance)) ?></p>
-<p>Status: <span class="badge badge-<?= Html::encode($model->status) ?>"><?= Html::encode($model->status) ?></span></p>
+<p>Status: <?= Badge::status($model->status) ?></p>
 <p>Start date: <?= Html::encode($model->start_date) ?></p>
 <p>Expected completion: <?= Html::encode($model->expected_completion_date) ?></p>
 <p>Assigned staff: <?= Html::encode($model->assignedStaff->full_name) ?></p>
@@ -59,7 +60,7 @@ $this->title = $model->loan_number;
     </div>
 <?php endif; ?>
 
-<?php if ($canManageLoan && in_array($model->status, ['active', 'overdue'], true)): ?>
+<?php if ($canManageLoan && $model->isOpenForActivity()): ?>
     <?= Html::beginForm(['guarantor/create', 'loanId' => $model->id], 'post') ?>
         <div>
             <label>
@@ -97,7 +98,7 @@ $this->title = $model->loan_number;
 
 <h2>Repayments</h2>
 
-<?php if ($canRecordRepayment && in_array($model->status, ['active', 'overdue'], true)): ?>
+<?php if ($canRecordRepayment && $model->isOpenForActivity()): ?>
     <?= Html::beginForm(['repayment/create', 'loanId' => $model->id], 'post') ?>
         <label>
             Amount

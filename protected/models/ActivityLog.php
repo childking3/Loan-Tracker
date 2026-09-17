@@ -44,6 +44,7 @@ class ActivityLog extends ActiveRecord
         'loan' => 'loan_number',
         'loan_package' => 'name',
         'guarantor' => 'full_name',
+        'market' => 'name',
         'user' => 'username',
         // repayment has no name column - its Entity-column display
         // ("Repayment on LN-000024") is built from this field via a join.
@@ -88,6 +89,20 @@ class ActivityLog extends ActiveRecord
     ];
 
     /**
+     * Per-entity-type overrides for FIELD_LABELS above, which is a flat
+     * column-name => label map shared across every entity type. That's a
+     * real collision for a column name reused with a different meaning on
+     * two entities - 'name' already means "Package name" globally, which
+     * would silently mislabel Market's own 'name' column the same way.
+     * Checked here first, before falling back to the global map.
+     */
+    private const FIELD_LABELS_BY_TYPE = [
+        'market' => [
+            'name' => 'Market name',
+        ],
+    ];
+
+    /**
      * Columns storing another table's id - resolved to that record's
      * display name (batched via LogController::resolveEntityNames())
      * instead of showing a bare id.
@@ -95,6 +110,7 @@ class ActivityLog extends ActiveRecord
     private const FOREIGN_KEYS = [
         'customer_id' => 'customer',
         'package_id' => 'loan_package',
+        'market_id' => 'market',
         'assigned_staff_id' => 'user',
         'created_by' => 'user',
         'loan_id' => 'loan',
@@ -163,8 +179,16 @@ class ActivityLog extends ActiveRecord
         return $refs;
     }
 
-    public static function fieldLabel(string $field): string
+    public static function fieldLabel(string $field, ?string $entityType = null): string
     {
+        // entity_type is itself nullable (AuditLogger::audit() is called
+        // with entityType=null from e.g. ImportController's CSV-import
+        // logging) - indexing FIELD_LABELS_BY_TYPE with a null key would
+        // otherwise raise a warning on every field of every such row.
+        if ($entityType !== null && isset(self::FIELD_LABELS_BY_TYPE[$entityType][$field])) {
+            return self::FIELD_LABELS_BY_TYPE[$entityType][$field];
+        }
+
         return self::FIELD_LABELS[$field] ?? ucfirst(str_replace('_', ' ', $field));
     }
 

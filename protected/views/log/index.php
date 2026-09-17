@@ -4,6 +4,7 @@
 /** @var string $pageTitle */
 /** @var \yii\data\ActiveDataProvider $dataProvider */
 /** @var array $entityNames */
+/** @var bool $showChanges */
 
 use app\models\ActivityLog;
 use yii\helpers\Html;
@@ -22,6 +23,8 @@ $currentGroup = null;
 ?>
 <h1><?= Html::encode($pageTitle) ?></h1>
 
+<?php $columnCount = $showChanges ? 6 : 5; ?>
+
 <div class="table-scroll">
 <table>
     <thead>
@@ -30,7 +33,9 @@ $currentGroup = null;
         <th>User</th>
         <th>Action</th>
         <th>Entity</th>
-        <th>Changes</th>
+        <?php if ($showChanges): ?>
+            <th>Changes</th>
+        <?php endif; ?>
         <th>IP address</th>
     </tr>
     </thead>
@@ -42,7 +47,7 @@ $currentGroup = null;
             $currentGroup = $group;
         ?>
         <tr class="log-group-row">
-            <th colspan="6"><?= Html::encode($group) ?></th>
+            <th colspan="<?= $columnCount ?>"><?= Html::encode($group) ?></th>
         </tr>
         <?php endif; ?>
         <tr>
@@ -52,6 +57,9 @@ $currentGroup = null;
             <td>
                 <?php if ($entry->entity_type === null): ?>
                     <?= Html::encode('') ?>
+                <?php elseif ($entry->entity_type === 'user' && $entry->entity_id === null && isset($entry->new_value['username'])): ?>
+                    <?php // login_failed: no real user row to resolve (bad/unknown username attempted), the attempted value itself - already redacted at write time unless it matched a real username - is the only display value there is. ?>
+                    user &mdash; <?= Html::encode($entry->new_value['username']) ?>
                 <?php else: ?>
                     <?php $name = $entityNames[$entry->entity_type][$entry->entity_id] ?? null; ?>
                     <?= Html::encode($entry->entity_type) ?>
@@ -62,29 +70,31 @@ $currentGroup = null;
                     <?php endif; ?>
                 <?php endif; ?>
             </td>
-            <td>
-                <?php $changes = $entry->getChanges(); ?>
-                <?php if ($changes === []): ?>
-                    <span class="muted">&ndash;</span>
-                <?php else: ?>
-                    <ul>
-                        <?php foreach ($changes as $field => $value): ?>
-                            <li>
-                                <strong><?= Html::encode(ActivityLog::fieldLabel($field)) ?>:</strong>
-                                <?php if ($value['old'] === null): ?>
-                                    <?= Html::encode(ActivityLog::formatChangeValue($field, $value['new'], $entityNames)) ?>
-                                <?php elseif ($value['new'] === null): ?>
-                                    <?= Html::encode(ActivityLog::formatChangeValue($field, $value['old'], $entityNames)) ?>
-                                <?php else: ?>
-                                    <?= Html::encode(ActivityLog::formatChangeValue($field, $value['old'], $entityNames)) ?>
-                                    &rarr;
-                                    <?= Html::encode(ActivityLog::formatChangeValue($field, $value['new'], $entityNames)) ?>
-                                <?php endif; ?>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                <?php endif; ?>
-            </td>
+            <?php if ($showChanges): ?>
+                <td>
+                    <?php $changes = $entry->getChanges(); ?>
+                    <?php if ($changes === []): ?>
+                        <span class="muted">&ndash;</span>
+                    <?php else: ?>
+                        <ul>
+                            <?php foreach ($changes as $field => $value): ?>
+                                <li>
+                                    <strong><?= Html::encode(ActivityLog::fieldLabel($field, $entry->entity_type)) ?>:</strong>
+                                    <?php if ($value['old'] === null): ?>
+                                        <?= Html::encode(ActivityLog::formatChangeValue($field, $value['new'], $entityNames)) ?>
+                                    <?php elseif ($value['new'] === null): ?>
+                                        <?= Html::encode(ActivityLog::formatChangeValue($field, $value['old'], $entityNames)) ?>
+                                    <?php else: ?>
+                                        <?= Html::encode(ActivityLog::formatChangeValue($field, $value['old'], $entityNames)) ?>
+                                        &rarr;
+                                        <?= Html::encode(ActivityLog::formatChangeValue($field, $value['new'], $entityNames)) ?>
+                                    <?php endif; ?>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
+                </td>
+            <?php endif; ?>
             <td><?= Html::encode($entry->ip_address ?? '') ?></td>
         </tr>
     <?php endforeach; ?>

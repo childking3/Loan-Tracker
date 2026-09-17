@@ -1,0 +1,1744 @@
+/*
+ * Application stylesheet. Plain, hand-written CSS - no Bootstrap, no build
+ * step - matching the project's no-Composer, no-widget-libraries decision.
+ * Styling mostly targets bare HTML elements (table, form, button) rather
+ * than requiring a class on every element, since the views were written
+ * with plain Html:: helper calls throughout. A handful of utility classes
+ * (.flash-*, .badge-*, .stat-tile, .auth-card) exist only where a plain tag
+ * selector cannot express the distinction (for example, a success flash
+ * message versus an error one).
+ *
+ * Redesigned again 2026-09-12 at the user's explicit request to move away
+ * from the previous pass's flat, restrained look - this time toward
+ * something that reads as "advanced," with real depth and motion, not
+ * just considered typography and borders. The 2026-09-11 redesign's
+ * "restrained, no gradients/animation" rule is deliberately lifted for
+ * this pass (confirmed directly with the user, not assumed) - everything
+ * below leans into shadows, gradient fills, and smooth hover/press motion
+ * on purpose.
+ *
+ * What stayed on purpose: the warm umber/gold ledger palette (still fits
+ * a lending business better than generic SaaS blue or purple), the serif/
+ * sans type pairing, and dark mode via the same `data-theme` attribute
+ * switch. What changed:
+ *  - A real shadow system (--shadow-xs through --shadow-lg, plus a
+ *    colored --shadow-primary for the primary button/link surfaces)
+ *    instead of the single flat --shadow-card kept for one card. Cards,
+ *    the table container, and buttons now have actual elevation.
+ *  - Buttons get a diagonal gradient fill, a colored shadow, and lift on
+ *    hover/press (transform + shadow transition) instead of a flat color
+ *    swap. Every interactive surface (nav links, pagination, table rows,
+ *    badges) now transitions smoothly rather than snapping.
+ *  - Radii roughly doubled (6-14px instead of 2-4px) for a softer,
+ *    more current feel - the previous pass's "sharp ledger corners" was
+ *    a deliberate choice for a flatter aesthetic that no longer applies
+ *    once shadows and gradients are back in play.
+ *  - Status badges are true pills again, filled with a soft gradient
+ *    rather than a flat tint - the earlier "pills read as generic
+ *    admin-template" objection was specifically about a flat, shadowless
+ *    treatment; a pill with real depth reads differently.
+ *  - Dashboard stat figures are now individual elevated cards (gradient
+ *    top accent bar, shadow, hover lift) instead of a flat divided row -
+ *    closer to a typical modern dashboard, which is exactly what was
+ *    asked for this time.
+ */
+
+:root {
+    --color-bg: #f4ede0;
+    --color-bg-alt: #ece2cf;
+    --color-surface: #fffdf9;
+    --color-border: #e0d3b8;
+    --color-text: #241f18;
+    --color-muted: #7d7160;
+    --color-primary: #6b5138;
+    --color-primary-dark: #3e2f1e;
+    --color-primary-light: #f1e6d0;
+    --color-accent: #b3822f;
+    --color-accent-light: #e8c887;
+    --color-success-bg: #e9f0e2;
+    --color-success-text: #3f6b3d;
+    --color-success-border: #c6dab8;
+    --color-error-bg: #f6e7e0;
+    --color-error-text: #9c4223;
+    --color-error-border: #e4c2ac;
+    --color-header-bg: #2c2113;
+    --color-header-bg-alt: #3d2f1c;
+    --color-header-text: #f1e6d2;
+
+    --radius-sm: 7px;
+    --radius-md: 11px;
+    --radius-lg: 16px;
+    --radius-pill: 999px;
+
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-base: 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+    --shadow-xs: 0 1px 2px rgba(36, 31, 24, 0.08);
+    --shadow-sm: 0 2px 8px rgba(36, 31, 24, 0.10), 0 1px 2px rgba(36, 31, 24, 0.08);
+    --shadow-md: 0 8px 24px rgba(36, 31, 24, 0.14), 0 2px 6px rgba(36, 31, 24, 0.08);
+    --shadow-lg: 0 20px 48px rgba(36, 31, 24, 0.20), 0 6px 16px rgba(36, 31, 24, 0.10);
+    --shadow-primary: 0 6px 18px rgba(107, 81, 56, 0.38);
+    --shadow-primary-hover: 0 10px 26px rgba(107, 81, 56, 0.46);
+}
+
+/*
+ * Dark mode: same variable set, re-pointed at dark equivalents, switched
+ * by a `data-theme="dark"` attribute on <html>. The attribute (not a
+ * media query alone) is what makes it a togglable preference rather than
+ * just following the OS setting - see the inline script in
+ * layouts/main.php for how it's set before first paint and how it's
+ * flipped by the header button. Shadows are deepened/darkened rather than
+ * reused as-is - a shadow tuned for a cream background all but disappears
+ * against a near-black one.
+ */
+[data-theme="dark"] {
+    --color-bg: #16120c;
+    --color-bg-alt: #1c1710;
+    --color-surface: #221b12;
+    --color-border: #40331f;
+    --color-text: #f0e4cd;
+    --color-muted: #ab9a7c;
+    --color-primary: #d9ac68;
+    --color-primary-dark: #eec488;
+    --color-primary-light: #3a2d1a;
+    --color-accent: #e0b563;
+    --color-accent-light: #4a3a20;
+    --color-success-bg: #1f2f1c;
+    --color-success-text: #8fc17c;
+    --color-success-border: #33492c;
+    --color-error-bg: #34211a;
+    --color-error-text: #e39d7f;
+    --color-error-border: #55362a;
+    --color-header-bg: #17120a;
+    --color-header-bg-alt: #241b0f;
+    --color-header-text: #eee1c6;
+
+    --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-sm: 0 3px 10px rgba(0, 0, 0, 0.45);
+    --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 24px 56px rgba(0, 0, 0, 0.6);
+    --shadow-primary: 0 6px 20px rgba(217, 172, 104, 0.28);
+    --shadow-primary-hover: 0 10px 28px rgba(217, 172, 104, 0.36);
+}
+
+[data-theme="dark"] th {
+    background: #2c22127a;
+}
+
+[data-theme="dark"] tbody tr:nth-child(even) {
+    background: #1c150c77;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background:
+        radial-gradient(1100px 480px at 12% -12%, rgba(179, 130, 47, 0.08), transparent 60%),
+        var(--color-bg);
+    color: var(--color-text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+}
+
+a {
+    color: var(--color-primary);
+    text-decoration: none;
+    transition: color var(--transition-fast);
+}
+
+[data-theme="dark"] a {
+    color: var(--color-accent);
+}
+
+a:hover {
+    color: var(--color-accent);
+    text-decoration: underline;
+}
+
+h1, h2, h3 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    line-height: 1.25;
+    color: var(--color-text);
+}
+
+h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0 0 1.2rem;
+    letter-spacing: 0.01em;
+}
+
+h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 2.25rem 0 1rem;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid var(--color-border);
+    position: relative;
+}
+
+h2::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    width: 3.5rem;
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-accent), transparent);
+}
+
+/*
+ * Bare h3 as a sub-heading inside an h2 section (e.g. the Active/History
+ * split under a customer's "Loans" h2) - distinct from .stat-group-label,
+ * which is also an h3 but styled as a small italic accent label, not a
+ * section heading. No border/underline (that's h2's device, reserved for
+ * top-level sections) and a smaller size so it reads as one level down.
+ */
+h3 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 1.5rem 0 0.75rem;
+}
+
+h3:first-child {
+    margin-top: 0;
+}
+
+/* Layout */
+
+header {
+    background: linear-gradient(165deg, var(--color-header-bg-alt) 0%, var(--color-header-bg) 65%);
+    color: var(--color-header-text);
+    padding: 0.9rem 1.75rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.28);
+    position: relative;
+    z-index: 10;
+}
+
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    font-weight: 700;
+    font-size: 1.15rem;
+    letter-spacing: 0.01em;
+    color: var(--color-header-text);
+    white-space: nowrap;
+}
+
+.brand:hover {
+    text-decoration: none;
+    color: var(--color-header-text);
+}
+
+.brand-mark {
+    background: linear-gradient(120deg, var(--color-accent-light), var(--color-accent));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-style: italic;
+}
+
+header a {
+    color: var(--color-header-text);
+}
+
+header nav {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+    margin-right: auto;
+}
+
+header nav a {
+    opacity: 0.8;
+    padding: 0.5rem 0.85rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.9rem;
+    transition: background-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+header nav a:hover {
+    opacity: 1;
+    background: rgba(241, 230, 210, 0.1);
+    text-decoration: none;
+    transform: translateY(-1px);
+}
+
+header nav a.is-active {
+    opacity: 1;
+    color: #2c2113;
+    background: linear-gradient(135deg, var(--color-accent-light), var(--color-accent));
+    box-shadow: 0 4px 14px rgba(179, 130, 47, 0.4);
+    font-weight: 600;
+}
+
+[data-theme="dark"] header nav a.is-active {
+    /* Own gradient, not the light-mode one reused as-is - that one
+       mixes --color-accent-light (a dark tint in dark mode) with
+       --color-accent (light), so part of the pill was dark-on-dark
+       for this dark override text. Measured ~2.2:1 at the gradient's
+       darker end from a real screenshot (WCAG wants 4.5:1, or 3:1 for
+       large bold text - this didn't clear either). Both stops here are
+       light in dark mode, matching every other fixed instance of this
+       same mistake in this file. */
+    background: linear-gradient(135deg, var(--color-accent), var(--color-primary-dark));
+    color: #241b0f;
+}
+
+header form {
+    margin: 0;
+}
+
+/*
+ * header input[type="submit"] alongside header button: the logout
+ * control is Html::submitButton(), which renders <input type="submit">,
+ * not <button> - a plain `header button` selector never touches it, and
+ * without this it silently falls through to the generic solid-fill
+ * button style below instead of the header's ghost-button treatment
+ * (caught by actually looking at a rendered screenshot, not just
+ * reading the CSS - the two looked identical in the source order but
+ * rendered as two different button styles sitting side by side).
+ */
+header button,
+header input[type="submit"] {
+    background: rgba(241, 230, 210, 0.06);
+    border: 1px solid rgba(241, 230, 210, 0.28);
+    color: var(--color-header-text);
+    padding: 0.45rem 0.9rem;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    font-size: 0.87rem;
+    font-weight: 400;
+    box-shadow: none;
+    transform: none;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+header button:hover,
+header input[type="submit"]:hover {
+    background: rgba(241, 230, 210, 0.14);
+    border-color: rgba(241, 230, 210, 0.5);
+    transform: translateY(-1px);
+}
+
+.user-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.88rem;
+    color: var(--color-header-text);
+    opacity: 0.8;
+    text-decoration: none;
+}
+
+.user-chip:hover {
+    opacity: 1;
+}
+
+.avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.7rem;
+    height: 1.7rem;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    vertical-align: middle;
+    box-shadow: 0 0 0 2px rgba(241, 230, 210, 0.25);
+}
+
+.avatar-placeholder {
+    background: linear-gradient(135deg, var(--color-accent-light), var(--color-accent));
+    color: #2c2113;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+header .avatar-placeholder {
+    background: linear-gradient(135deg, rgba(241, 230, 210, 0.3), rgba(241, 230, 210, 0.12));
+    color: var(--color-header-text);
+}
+
+.avatar-large {
+    width: 5rem;
+    height: 5rem;
+    font-size: 1.75rem;
+    box-shadow: var(--shadow-md);
+}
+
+main {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem 3.5rem;
+}
+
+/* Tables */
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin: 0.85rem 0 1.75rem;
+    box-shadow: var(--shadow-sm);
+}
+
+/*
+ * Wraps a wide table (loan/customer/log lists - 4-6 columns, too many to
+ * meaningfully narrow) so it can scroll horizontally on its own without
+ * the page itself ever needing to. The border/radius/margin/shadow live
+ * on this wrapper, not the inner table - `border-collapse: collapse`
+ * interacting with `overflow` on the table's own box clips its border
+ * unpredictably once scrolled, so a dedicated wrapper's border/shadow
+ * stays put on its own box regardless of the inner table's scroll
+ * position.
+ */
+.table-scroll {
+    overflow: hidden;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    margin: 0.85rem 0 1.75rem;
+    box-shadow: var(--shadow-sm);
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) var(--color-surface);
+}
+
+.table-scroll table {
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    box-shadow: none;
+}
+
+th, td {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.92rem;
+}
+
+th {
+    background: linear-gradient(180deg, var(--color-primary-light), var(--color-bg-alt));
+    font-weight: 700;
+    color: var(--color-primary);
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+}
+
+[data-theme="dark"] th {
+    color: var(--color-accent);
+}
+
+tbody tr {
+    transition: background-color var(--transition-fast);
+}
+
+tbody tr:nth-child(even) {
+    background: rgba(107, 81, 56, 0.04);
+}
+
+tbody tr:last-child td {
+    border-bottom: none;
+}
+
+tbody tr:hover {
+    background: var(--color-primary-light);
+}
+
+/*
+ * yii\widgets\LinkPager's default markup (<ul class="pagination"> of
+ * <li><a>) - styled as a row of soft pill buttons with a lifted active
+ * state, matching the button language used everywhere else now.
+ */
+.pagination {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    list-style: none;
+    margin: 0 0 1.5rem;
+    padding: 0;
+}
+
+.pagination li {
+    margin: 0;
+}
+
+.pagination a,
+.pagination span {
+    display: block;
+    min-width: 2.3rem;
+    padding: 0.4rem 0.6rem;
+    text-align: center;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-pill);
+    color: var(--color-text);
+    font-size: 0.85rem;
+    background: var(--color-surface);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.pagination a:hover {
+    background: var(--color-primary-light);
+    text-decoration: none;
+}
+
+.pagination .active a {
+    background: var(--color-primary);
+    border-color: transparent;
+    color: var(--color-header-text);
+}
+
+[data-theme="dark"] .pagination .active a {
+    color: #241b0f;
+}
+
+.pagination .disabled span {
+    color: var(--color-muted);
+    opacity: 0.5;
+    background: transparent;
+}
+
+/* Log view's month/year group-header rows - a section divider, not a
+   repeat of the column header row it sits below */
+.log-group-row th {
+    background: var(--color-bg);
+    color: var(--color-text);
+    text-transform: none;
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    font-size: 0.95rem;
+    letter-spacing: normal;
+    padding-top: 0.9rem;
+}
+
+.log-group-row:hover {
+    background: transparent;
+}
+
+td ul {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.85rem;
+}
+
+td ul li {
+    margin-bottom: 0.15rem;
+}
+
+/* Forms */
+
+form {
+    margin: 0.75rem 0 1.5rem;
+}
+
+label {
+    display: block;
+    margin-bottom: 1rem;
+    font-size: 0.87rem;
+    font-weight: 600;
+    color: var(--color-muted);
+}
+
+label > input,
+label > select,
+label > textarea {
+    display: block;
+    margin-top: 0.4rem;
+    color: var(--color-text);
+    font-size: 0.9rem;
+    font-weight: 400;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+input[type="tel"],
+input[type="file"],
+select,
+textarea {
+    width: 100%;
+    max-width: 360px;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: inherit;
+    box-shadow: inset 0 1px 2px rgba(36, 31, 24, 0.05);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+input[type="file"] {
+    padding: 0.4rem;
+    max-width: 420px;
+    box-shadow: none;
+}
+
+input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+    accent-color: var(--color-primary);
+    cursor: pointer;
+}
+
+/*
+ * A label wrapping a checkbox needs the opposite layout from a label
+ * wrapping a text input - inline, checkbox first, no top margin on the
+ * input (label > input's block/margin-top rule above is for text-style
+ * inputs specifically). Its own class rather than a :has() selector,
+ * which would need a modern-only pseudo-class for something this simple.
+ */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.checkbox-label input[type="checkbox"] {
+    margin: 0;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 4px rgba(179, 130, 47, 0.18);
+}
+
+[data-theme="dark"] input:focus,
+[data-theme="dark"] select:focus,
+[data-theme="dark"] textarea:focus {
+    box-shadow: 0 0 0 4px rgba(224, 181, 99, 0.22);
+}
+
+textarea {
+    max-width: 480px;
+    min-height: 4.5rem;
+}
+
+button, input[type="submit"], .btn {
+    display: inline-block;
+    background: var(--color-primary);
+    color: var(--color-header-text);
+    border: none;
+    padding: 0.65rem 1.35rem;
+    border-radius: var(--radius-pill);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.01em;
+    box-shadow: var(--shadow-xs);
+    transition: background-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+button:hover, input[type="submit"]:hover, .btn:hover {
+    text-decoration: none;
+    background: var(--color-primary-dark);
+}
+
+button:active, input[type="submit"]:active, .btn:active {
+    box-shadow: none;
+}
+
+/*
+ * Dark near-black text on the primary solid-fill buttons (Login,
+ * Create loan, ...) in dark mode - their background is a light
+ * gold/tan there, so light text (this app's default button color)
+ * would be nearly invisible on it. Explicitly excludes the header's
+ * own buttons (Logout, the theme toggle, nav-toggle) - those are
+ * translucent "ghost" buttons on the header's own dark background,
+ * not solid-fill, and need their light text color kept.
+ */
+[data-theme="dark"] button:not(.theme-toggle):not(.nav-toggle):not(header button),
+[data-theme="dark"] input[type="submit"]:not(header input[type="submit"]),
+[data-theme="dark"] .btn {
+    color: #241b0f;
+}
+
+/* Flash messages */
+
+.flash-success, .flash-error {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.8rem 1.1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    border-left-width: 4px;
+    margin-bottom: 1.1rem;
+    font-size: 0.9rem;
+    box-shadow: var(--shadow-xs);
+}
+
+.flash-success {
+    background: var(--color-success-bg);
+    color: var(--color-success-text);
+    border-color: var(--color-success-border);
+    border-left-color: var(--color-success-text);
+}
+
+.flash-error {
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+    border-color: var(--color-error-border);
+    border-left-color: var(--color-error-text);
+}
+
+/* Status badges (loan status) - true pills again, filled with a soft
+   gradient rather than a flat tint, now that depth is back in play. */
+
+.badge {
+    display: inline-block;
+    padding: 0.28rem 0.75rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    box-shadow: var(--shadow-xs);
+}
+
+/*
+ * Each badge's gradient is two LIGHT-mode-only literal stops, with a
+ * dedicated dark-mode override below rather than reusing --color-*-light
+ * variables inside the gradient itself - those variables are repurposed
+ * as dark, subtle tints in dark mode (correct for e.g. a table row hover
+ * background), not light ones, so reusing them here produced a gradient
+ * that faded from dark to light within the badge and made the text
+ * illegible across half of it. Caught only by an actual dark-mode
+ * screenshot, not by reading the CSS - textbook example of the same
+ * mistake this project has hit more than once before with new gradient/
+ * shadow work. Dark mode gets its own two-stop gradient per badge
+ * instead, built from two consistently dark tones so one light text
+ * color stays legible across the whole pill, matching the working
+ * pattern already used for buttons and the pagination active state
+ * (both gradient stops the same "temperature" in each theme, never
+ * dark-to-light within one gradient).
+ */
+.badge-active {
+    background: linear-gradient(135deg, #f1e6d0, #e8c887);
+    color: #5c4726;
+}
+
+.badge-overdue {
+    background: linear-gradient(135deg, #f6e7e0, #f0c9ab);
+    color: #8a3c1f;
+}
+
+.badge-completed {
+    background: linear-gradient(135deg, #e9f0e2, #cfe4bf);
+    color: #3f6b3d;
+}
+
+.badge-cancelled {
+    background: linear-gradient(135deg, #ece5d5, #ddd2ba);
+    color: #7d7160;
+    box-shadow: none;
+}
+
+[data-theme="dark"] .badge-active {
+    background: linear-gradient(135deg, #4a3a20, #5c4726);
+    color: var(--color-accent);
+}
+
+[data-theme="dark"] .badge-overdue {
+    background: linear-gradient(135deg, #4a2a1c, #5c3524);
+    color: #e39d7f;
+}
+
+[data-theme="dark"] .badge-completed {
+    background: linear-gradient(135deg, #23331f, #2c4026);
+    color: #8fc17c;
+}
+
+[data-theme="dark"] .badge-cancelled {
+    background: linear-gradient(135deg, #362a17, #40311c);
+    color: var(--color-muted);
+    box-shadow: none;
+}
+
+/*
+ * Dashboard stat figures - individual elevated cards with a gradient
+ * accent bar, instead of the previous pass's flat divided row. Grouped
+ * under a named label ("Loans", "Collections") so the page still reads
+ * as organized sections, just with each figure now its own surface.
+ */
+.stat-group {
+    margin-top: 1.75rem;
+}
+
+.stat-group:first-child {
+    margin-top: 1rem;
+}
+
+.stat-group-label {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 0.98rem;
+    color: var(--color-accent);
+    margin: 0 0 0.6rem;
+}
+
+.stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin: 0;
+}
+
+.stat-tile {
+    flex: 1;
+    min-width: 170px;
+    padding: 1.25rem 1.4rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+    transition: transform var(--transition-base), box-shadow var(--transition-base);
+}
+
+.stat-tile::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--color-accent), var(--color-primary));
+}
+
+.stat-tile:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md);
+}
+
+.stat-tile--warning::before { background: linear-gradient(90deg, var(--color-error-text), #e39d7f); }
+.stat-tile--success::before { background: linear-gradient(90deg, var(--color-success-text), #8fc17c); }
+
+.stat-tile .stat-label {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--color-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.45rem;
+}
+
+.stat-tile .stat-value {
+    display: block;
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    font-size: 1.7rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+}
+
+.stat-tile--primary .stat-value { color: var(--color-primary); }
+[data-theme="dark"] .stat-tile--primary .stat-value { color: var(--color-accent); }
+.stat-tile--warning .stat-value { color: var(--color-error-text); }
+.stat-tile--success .stat-value { color: var(--color-success-text); }
+
+/*
+ * Dashboard "app" layout - greeting bar, a hero balance card, an icon
+ * quick-actions grid, and a recent-activity feed - added 2026-09-12 at
+ * the user's request to read as a real dashboard (modeled on a mobile
+ * banking app's home screen) rather than a plain stats-and-a-table page.
+ * Same color variables as everywhere else in this file - only the
+ * layout and the addition of icons are new, not the palette.
+ *
+ * Icons are hand-drawn inline SVG (stroke="currentColor", no fill),
+ * not an icon font or a CDN-hosted icon library - this project has no
+ * Composer/CDN dependency anywhere and isn't starting one for icons.
+ * `.icon` sizes and colors them via normal CSS (width/height/color),
+ * same as styling any other inline element.
+ */
+.icon {
+    display: inline-block;
+    width: 1.25rem;
+    height: 1.25rem;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+.dash-greeting {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+}
+
+.dash-greeting-label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.15rem;
+}
+
+.dash-greeting h1 {
+    margin: 0;
+}
+
+/* --color-header-bg pair, not --color-primary - see .record-avatar's
+   own comment; found and fixed as the same bug in the same audit. */
+.dash-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-header-bg-alt), var(--color-header-bg));
+    color: var(--color-header-text);
+    box-shadow: var(--shadow-sm);
+    flex-shrink: 0;
+}
+
+.dash-avatar .icon {
+    width: 1.4rem;
+    height: 1.4rem;
+}
+
+/* Hero balance card - the one thing on the page styled distinctly from
+   every other card, since it's the single most important figure here. */
+/*
+ * Uses --color-header-bg/--color-header-text, not --color-primary/
+ * --color-header-text - those two are a matched pair that both flip
+ * between themes (dark-brown+light-text in light mode, but
+ * --color-primary itself becomes light gold in dark mode, which broke
+ * badly paired with the still-light --color-header-text). --color-
+ * header-bg is deliberately theme-stable (the app's own header stays
+ * dark-brown in both themes for the same reason) - reusing it here
+ * keeps this card looking the same "always dark" way regardless of
+ * theme, matching the reference app's own always-dark balance card.
+ * Found by screenshotting dark mode specifically, not by reading the
+ * CSS - the same category of mistake this file's own badge comment
+ * already documents once.
+ */
+.balance-card {
+    background: linear-gradient(150deg, var(--color-header-bg-alt) 0%, var(--color-header-bg) 100%);
+    color: var(--color-header-text);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem 1.6rem;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+    margin-bottom: 1.75rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.balance-card::after {
+    content: "";
+    position: absolute;
+    top: -40%;
+    right: -10%;
+    width: 60%;
+    padding-bottom: 60%;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.08), transparent 70%);
+    pointer-events: none;
+}
+
+.balance-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+
+.balance-card-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    opacity: 0.8;
+}
+
+.balance-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: inherit;
+    padding: 0.3rem 0.65rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.78rem;
+    cursor: pointer;
+    box-shadow: none;
+    transform: none;
+}
+
+.balance-toggle:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: none;
+}
+
+.balance-toggle .icon {
+    width: 1rem;
+    height: 1rem;
+}
+
+.balance-card-value {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif", serif;
+    font-size: 2.1rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 1.1rem;
+    position: relative;
+}
+
+.balance-card-footer {
+    display: flex;
+    gap: 2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+    padding-top: 0.9rem;
+    position: relative;
+}
+
+.balance-footer-label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.75;
+    margin-bottom: 0.2rem;
+}
+
+.balance-footer-value {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.balance-footer-value.is-warning {
+    color: #f5c9a8;
+}
+
+.section-header-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+}
+
+.section-header-row h2 {
+    margin-bottom: 0;
+}
+
+.view-all-link {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+/* Quick actions - an icon grid, 4 across on a wide screen, wrapping to
+   fewer per row automatically as space narrows. */
+.quick-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 0.9rem;
+    margin: 0 0 0.5rem;
+}
+
+.quick-action {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 1.1rem 0.5rem;
+    color: var(--color-text);
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+    box-shadow: var(--shadow-xs);
+    transition: transform var(--transition-base), box-shadow var(--transition-base), background-color var(--transition-fast);
+}
+
+.quick-action:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md);
+    text-decoration: none;
+    color: var(--color-text);
+}
+
+/*
+ * No dark-mode text-color override here, unlike several similar
+ * circular-icon components nearby - checked, doesn't need one.
+ * --color-primary-light/--color-accent-light are already dark tints in
+ * dark mode (the same "-light variables mean dark tint there" fact
+ * that broke .badge-active/.record-avatar/.dash-avatar when a gradient
+ * assumed they meant "light color"), and the un-overridden base
+ * `color: var(--color-primary)` already becomes light gold in dark
+ * mode - light icon on a dark tint, correct with no override needed.
+ * A copy-pasted `[data-theme="dark"] { color: #241b0f }` override
+ * (matching the pattern used where one genuinely was needed) was
+ * sitting here forcing near-black onto that same dark background -
+ * measured ~1.37:1 contrast from a real screenshot's pixels, the
+ * worst of the three contrast bugs found in this same audit.
+ */
+.quick-action-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-primary-light), var(--color-accent-light));
+    color: var(--color-primary);
+}
+
+.quick-action-icon .icon {
+    width: 1.3rem;
+    height: 1.3rem;
+}
+
+/* Recent activity feed */
+.activity-list {
+    list-style: none;
+    margin: 0.75rem 0 1.75rem;
+    padding: 0;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.activity-item {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.9rem 1.1rem;
+    border-bottom: 1px solid var(--color-border);
+    transition: background-color var(--transition-fast);
+}
+
+.activity-item:last-child {
+    border-bottom: none;
+}
+
+.activity-item:hover {
+    background: var(--color-primary-light);
+}
+
+.activity-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.activity-icon--in {
+    background: linear-gradient(135deg, #e9f0e2, #cfe4bf);
+    color: #3f6b3d;
+}
+
+/* No dark-mode override needed - see .quick-action-icon's own comment,
+   same construction, same reasoning. */
+.activity-icon--out {
+    background: linear-gradient(135deg, var(--color-primary-light), var(--color-accent-light));
+    color: var(--color-primary);
+}
+
+.activity-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.activity-title {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.activity-date {
+    display: block;
+    font-size: 0.76rem;
+    color: var(--color-muted);
+    margin-top: 0.1rem;
+}
+
+.activity-amount {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.activity-amount.is-in { color: var(--color-success-text); }
+.activity-amount.is-out { color: var(--color-primary); }
+
+/*
+ * Bottom tab bar - phone-width only (see the @media block), matching
+ * the reference app's own bottom navigation. The header's own nav
+ * still exists above this at every width (collapsed behind the
+ * hamburger menu below 640px, same as before) - this is an additional,
+ * faster-reach navigation surface for the phone case specifically, not
+ * a replacement for it.
+ */
+.bottom-nav {
+    display: none;
+}
+
+/*
+ * Page header row - a title plus one primary action (e.g. "Customers"
+ * + "Add Customer") - and a card-style list for records that read
+ * better as a scannable card (an avatar, a name, a couple of details,
+ * one action) than as a dense table row. Tables are kept where they
+ * already work well (loans, reports, logs - many comparable columns at
+ * once); this is for list views centered on one named record per row.
+ */
+.page-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+}
+
+.page-header-row h1 {
+    margin: 0;
+}
+
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.search-bar {
+    max-width: 360px;
+    margin-bottom: 1.5rem;
+}
+
+.search-input {
+    position: relative;
+}
+
+.search-input .icon {
+    position: absolute;
+    left: 0.85rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-muted);
+    width: 1.1rem;
+    height: 1.1rem;
+}
+
+.search-bar input {
+    max-width: 100%;
+    padding-left: 2.5rem;
+}
+
+.record-list {
+    list-style: none;
+    margin: 0 0 1.5rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.record-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.2rem;
+    box-shadow: var(--shadow-xs);
+    transition: transform var(--transition-base), box-shadow var(--transition-base);
+}
+
+.record-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+/*
+ * --color-header-bg/--color-header-text again, not --color-primary -
+ * checked this one's actual contrast after the balance-card mistake
+ * rather than assuming a lighter shade of the same bug wouldn't recur:
+ * measured ~1.56:1 (WCAG needs 4.5:1) between the initials and the
+ * background in dark mode, sampled directly from a real screenshot's
+ * pixels, not read off the CSS. It looked *faintly* legible at a
+ * glance in a full-page screenshot - bold text and anti-aliased edges
+ * can read as "there" well below the contrast a real viewer needs -
+ * which is exactly how this class of bug hides from a casual look.
+ */
+.record-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    height: 3rem;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-header-bg-alt), var(--color-header-bg));
+    color: var(--color-header-text);
+    font-weight: 700;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+    box-shadow: var(--shadow-xs);
+}
+
+.record-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.record-name {
+    display: block;
+    font-weight: 700;
+    font-size: 0.98rem;
+}
+
+.record-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.9rem;
+    color: var(--color-muted);
+    font-size: 0.82rem;
+    margin-top: 0.2rem;
+}
+
+.record-meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.record-meta-item .icon {
+    width: 0.9rem;
+    height: 0.9rem;
+}
+
+/*
+ * .record-icon: a purely decorative icon circle (a labeled field's icon on
+ * a detail page, a nav-card's icon on the "All Sections"/"More" pages) -
+ * nothing to click, no feedback needed.
+ *
+ * .record-action: the same circle used as an actual link (a list row's
+ * trailing chevron/edit affordance, e.g. customer/staff list rows) - gets
+ * real hover/focus feedback, which a bare decorative span shouldn't have.
+ * Previously one class doing both jobs, with every decorative usage
+ * carrying a redundant inline style to force the same look a shared rule
+ * gives for free; split so a bare <span> and a clickable <a> both start
+ * from the same look without either copying the other's markup.
+ *
+ * No dark-mode override needed - see .quick-action-icon's own comment.
+ */
+.record-icon,
+.record-action {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.2rem;
+    height: 2.2rem;
+    border-radius: 50%;
+    color: var(--color-primary);
+    background: var(--color-primary-light);
+}
+
+.record-icon .icon,
+.record-action .icon {
+    width: 1.1rem;
+    height: 1.1rem;
+}
+
+.record-action {
+    cursor: pointer;
+    transition: background var(--transition-base), color var(--transition-base), transform var(--transition-base);
+}
+
+.record-action:hover,
+.record-action:focus-visible {
+    background: var(--color-primary);
+    color: var(--color-header-text);
+    transform: scale(1.08);
+}
+
+/* Auth pages (login, and the guest landing page) */
+
+.auth-page {
+    min-height: calc(100vh - 4rem);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.auth-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 2.5rem 2.5rem 2.1rem;
+    width: 100%;
+    max-width: 380px;
+    position: relative;
+    overflow: hidden;
+}
+
+.auth-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 5px;
+    background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+}
+
+.auth-card h1 {
+    text-align: center;
+    margin-bottom: 0.5rem;
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    line-height: 1.4;
+}
+
+.auth-card h1 .brand-mark {
+    display: block;
+    font-size: 1.3rem;
+    font-style: normal;
+    letter-spacing: 0.08em;
+}
+
+.auth-card .auth-subtitle {
+    display: block;
+    text-align: center;
+    font-size: 0.72rem;
+    font-weight: 400;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 1.75rem;
+    position: relative;
+    padding-bottom: 1rem;
+}
+
+.auth-card .auth-subtitle::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    width: 2.5rem;
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+}
+
+.auth-card p {
+    text-align: center;
+    margin-bottom: 1.25rem;
+}
+
+.auth-card form {
+    margin: 0;
+}
+
+.auth-card button, .auth-card .btn {
+    width: 100%;
+    text-align: center;
+    padding: 0.8rem 1.35rem;
+}
+
+.auth-error {
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+    border: 1px solid var(--color-error-border);
+    border-left-width: 4px;
+    border-radius: var(--radius-sm);
+    padding: 0.65rem 0.9rem;
+    font-size: 0.87rem;
+    margin-bottom: 1.1rem;
+    list-style: none;
+}
+
+/* Small inline helpers */
+
+.muted {
+    color: var(--color-muted);
+    font-size: 0.9rem;
+}
+
+.inline-form {
+    display: inline-block;
+    margin: 0;
+}
+
+.theme-toggle {
+    background: rgba(241, 230, 210, 0.06);
+    border: 1px solid rgba(241, 230, 210, 0.28);
+    color: var(--color-header-text);
+    padding: 0.45rem 0.9rem;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    font-size: 0.87rem;
+    box-shadow: none;
+    transform: none;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.theme-toggle:hover {
+    background: rgba(241, 230, 210, 0.14);
+    border-color: rgba(241, 230, 210, 0.5);
+    transform: translateY(-1px);
+}
+
+/*
+ * Menu button for the phone-width header (see the @media block below for
+ * what it actually shows/hides) - hidden here unconditionally so it
+ * never appears above the 640px breakpoint, where the nav/user-chip/
+ * logout/theme-toggle it controls are never hidden in the first place.
+ */
+.nav-toggle {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    width: 2.2rem;
+    height: 2.2rem;
+    padding: 0;
+    background: rgba(241, 230, 210, 0.06);
+    border: 1px solid rgba(241, 230, 210, 0.28);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    box-shadow: none;
+    transform: none;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.nav-toggle:hover {
+    background: rgba(241, 230, 210, 0.14);
+    border-color: rgba(241, 230, 210, 0.5);
+}
+
+.nav-toggle-bar {
+    display: block;
+    width: 1.1rem;
+    height: 2px;
+    margin: 0 auto;
+    background: var(--color-header-text);
+    border-radius: 1px;
+}
+
+/*
+ * Phone-width layout. This is a web app used on Android in a browser
+ * (no native shell, no fixed viewport) - staff pull it up on their own
+ * phones as often as a desktop, so the fixed-width assumptions above
+ * need a narrow-viewport variant rather than relying on the browser to
+ * shrink everything uniformly. One breakpoint is enough here - there's
+ * no tablet-specific layout in this app worth a second one.
+ */
+/*
+ * Header/nav-only breakpoint, wider than the phone breakpoint below it.
+ * The top nav (links + avatar chip + Logout + Dark mode) starts wrapping
+ * onto a second/third line anywhere from 641px up to somewhere between
+ * 900px and 1024px - real tablet-portrait widths (iPad portrait is
+ * 768px), not an edge case. Split out from the old single 640px
+ * breakpoint (2026-09-17) so a tablet gets the hamburger-menu nav without
+ * also getting the rest of the phone treatment (4-column quick-actions
+ * grid, smaller balance-card text, fixed bottom tab bar) - those stay
+ * phone-only below.
+ */
+@media (max-width: 1023px) {
+    header {
+        padding: 0.7rem 1rem;
+        gap: 0.6rem;
+    }
+
+    /*
+     * Same "always visible, not behind the menu" reasoning as the phone
+     * breakpoint's own copy of this rule below - dark mode is a one-tap
+     * preference, not a navigation destination.
+     */
+    .nav-toggle {
+        display: flex;
+    }
+
+    header nav,
+    header .user-chip,
+    header form {
+        display: none;
+    }
+
+    header .theme-toggle {
+        margin-left: auto;
+    }
+
+    header.nav-open nav,
+    header.nav-open .user-chip,
+    header.nav-open form {
+        display: block;
+        width: 100%;
+    }
+
+    header.nav-open nav {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.25rem;
+        margin-right: 0;
+    }
+
+    header.nav-open nav a {
+        padding: 0.65rem 0.75rem;
+        border-radius: var(--radius-sm);
+    }
+
+    header.nav-open .user-chip {
+        padding: 0.5rem 0.25rem;
+    }
+
+    /* form's own width:100% above doesn't reach the button inside it -
+       button/input[type=submit] size to their own content by default. */
+    header.nav-open form button {
+        width: 100%;
+    }
+}
+
+@media (max-width: 640px) {
+    main {
+        padding: 1.5rem 1rem 6rem;
+    }
+
+    h1 {
+        font-size: 1.45rem;
+    }
+
+    .quick-actions-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.6rem;
+    }
+
+    .quick-action {
+        padding: 0.85rem 0.3rem;
+        font-size: 0.68rem;
+    }
+
+    .quick-action-icon {
+        width: 2.3rem;
+        height: 2.3rem;
+    }
+
+    .balance-card-value {
+        font-size: 1.75rem;
+    }
+
+    /*
+     * Bottom tab bar, phone-width only - fixed to the viewport bottom,
+     * matching the reference app. `main`'s own bottom padding above is
+     * enlarged specifically so the page's last real content never sits
+     * underneath this fixed bar.
+     */
+    .bottom-nav {
+        display: flex;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 20;
+        background: var(--color-surface);
+        border-top: 1px solid var(--color-border);
+        box-shadow: 0 -4px 16px rgba(36, 31, 24, 0.1);
+        padding: 0.4rem 0.25rem calc(0.4rem + env(safe-area-inset-bottom, 0px));
+    }
+
+    .bottom-nav-item {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.2rem;
+        padding: 0.3rem 0.2rem;
+        color: var(--color-muted);
+        font-size: 0.66rem;
+        font-weight: 600;
+        border-radius: var(--radius-sm);
+    }
+
+    .bottom-nav-item:hover {
+        text-decoration: none;
+        color: var(--color-muted);
+    }
+
+    .bottom-nav-item.is-active {
+        color: var(--color-primary);
+    }
+
+    [data-theme="dark"] .bottom-nav-item.is-active {
+        color: var(--color-accent);
+    }
+
+    th, td {
+        padding: 0.6rem 0.7rem;
+        font-size: 0.87rem;
+    }
+
+    .stats {
+        flex-direction: column;
+    }
+
+    .stat-tile {
+        min-width: 0;
+    }
+
+    .auth-card {
+        padding: 1.85rem 1.6rem 1.6rem;
+        max-width: 100%;
+    }
+
+    .auth-page {
+        padding: 0 1rem;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="number"],
+    input[type="date"],
+    input[type="tel"],
+    input[type="file"],
+    select,
+    textarea {
+        max-width: 100%;
+    }
+
+    /*
+     * Nav-open/hamburger rules live in the wider header/nav breakpoint
+     * above, not here - see its own docblock for why.
+     */
+}

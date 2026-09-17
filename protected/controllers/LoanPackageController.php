@@ -3,12 +3,12 @@
 namespace app\controllers;
 
 use app\components\AuditLogger;
+use app\helpers\ModelFinder;
 use app\models\LoanPackage;
 use Yii;
 use yii\filters\AccessControl;
 use yii\filters\VerbFilter;
 use yii\web\Controller;
-use yii\web\NotFoundHttpException;
 
 /**
  * Admin-only editing of the client's five loan packages, gated on
@@ -64,11 +64,6 @@ class LoanPackageController extends Controller
 
     private function findModel($id): LoanPackage
     {
-        $model = LoanPackage::findOne($id);
-        if ($model === null) {
-            throw new NotFoundHttpException('Loan package not found.');
-        }
-
-        return $model;
+        return ModelFinder::findOrFail(LoanPackage::class, $id, 'Loan package');
     }
 }

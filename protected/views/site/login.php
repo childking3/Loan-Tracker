@@ -9,7 +9,8 @@ $this->title = 'Login';
 ?>
 <div class="auth-page">
     <div class="auth-card">
-        <h1>Loan Tracker</h1>
+        <h1>DMC <span class="brand-mark">SPARKLE SERVICES</span></h1>
+        <span class="auth-subtitle">Loan Management System</span>
 
         <?php if ($model->hasErrors()): ?>
             <ul class="auth-error">
@@ -20,17 +21,13 @@ $this->title = 'Login';
         <?php endif; ?>
 
         <?= Html::beginForm(['site/login'], 'post') ?>
-            <div>
-                <?= Html::label('Username', 'loginform-username') ?>
-                <?= Html::textInput('LoginForm[username]', $model->username, ['id' => 'loginform-username']) ?>
-            </div>
-            <div>
-                <?= Html::label('Password', 'loginform-password') ?>
-                <?= Html::passwordInput('LoginForm[password]', $model->password, ['id' => 'loginform-password']) ?>
-            </div>
-            <div>
-                <?= Html::submitButton('Login') ?>
-            </div>
+            <label>Username
+                <?= Html::textInput('LoginForm[username]', $model->username) ?>
+            </label>
+            <label>Password
+                <?= Html::passwordInput('LoginForm[password]', $model->password) ?>
+            </label>
+            <?= Html::submitButton('Login') ?>
         <?= Html::endForm() ?>
     </div>
 </div>

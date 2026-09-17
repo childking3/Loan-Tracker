@@ -2,13 +2,18 @@
 
 /** @var \yii\web\View $this */
 /** @var \app\models\Customer $model */
+/** @var \app\models\Guarantor $guarantor */
 /** @var \app\models\Customer[] $duplicates */
+/** @var array $marketOptions */
 
 use yii\helpers\Html;
 
-$this->title = 'New customer';
+$this->title = 'Register New Customer';
 ?>
-<h1>New customer</h1>
+<div class="page-header-row">
+    <h1>Register New Customer</h1>
+    <?= Html::a('<svg class="icon" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> Back to Customers', ['customer/index'], ['class' => 'btn-icon']) ?>
+</div>
 
 <?php if ($duplicates !== []): ?>
     <div>
@@ -24,5 +29,7 @@ $this->title = 'New customer';
 
 <?= $this->render('_form', [
     'model' => $model,
+    'guarantor' => $guarantor,
+    'marketOptions' => $marketOptions,
     'confirmDuplicate' => $duplicates !== [],
 ]) ?>
