@@ -11,23 +11,34 @@ $common = require __DIR__ . '/common.php';
 $trustedProxyCidrs = parseCidrList(env('TRUSTED_PROXY_CIDRS', ''));
 
 // Whether this request genuinely arrived over HTTPS, for marking the
-// session/CSRF cookies Secure only when true (a Secure cookie is silently
-// dropped over plain HTTP, so APP_HOST_INFO being pinned to https:// isn't
-// enough - this app has no TLS of its own, the proxy terminates it and
-// signals the original scheme via X-Forwarded-Proto). Trusted only when
-// REMOTE_ADDR is inside $trustedProxyCidrs, not from the header alone, or
-// anyone could spoof it directly. Computed by hand against $_SERVER
-// (not via 'request.trustedHosts' below / Yii::$app->request->isSecure)
+// session/CSRF cookies Secure (a Secure cookie is silently dropped over
+// plain HTTP, so APP_HOST_INFO being pinned to https:// isn't enough -
+// this app has no TLS of its own, the proxy terminates it and signals the
+// original scheme via X-Forwarded-Proto).
+//
+// This deliberately trusts the header WITHOUT first checking REMOTE_ADDR
+// against $trustedProxyCidrs. That earlier gate was correct in isolation
+// but broke in production (found 2026-10-19): Apache's mod_remoteip
+// replaces REMOTE_ADDR with the real end-user IP whenever the request
+// arrives from an address in RemoteIPInternalProxy, so the CIDR test then
+// failed and these cookies shipped with NO Secure flag. It affected
+// exactly half of all requests, because the proxy reaches the wg1 upstream
+// peers from an address mod_remoteip rewrites for and the wg0 peers from
+// one it doesn't - so the same user got a protected or unprotected cookie
+// depending purely on which node served their login.
+//
+// Trusting the header is safe here, specifically:
+//  - Apache :81 binds only to the WireGuard addresses and the nodes' public
+//    IPs are closed on that port, so nothing off-tunnel can reach the app.
+//  - nginx sets `X-Forwarded-Proto $scheme` unconditionally in every
+//    proxying location, so a client cannot strip or override it.
+//  - Forging it to "https" could only turn the Secure flag ON, which is
+//    strictly safer. It cannot be used to turn the flag off, so there is no
+//    attack the old gate was preventing.
+//
+// Still computed by hand against $_SERVER (not Yii::$app->request->isSecure)
 // because Yii::$app doesn't exist yet at this point in the bootstrap.
-$remoteAddr = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
-$isFromTrustedProxy = false;
-foreach ($trustedProxyCidrs as $cidr) {
-    if (ipInCidr($remoteAddr, $cidr)) {
-        $isFromTrustedProxy = true;
-        break;
-    }
-}
-$isSecureRequest = $isFromTrustedProxy && ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
+$isSecureRequest = ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
 
 $config = [
     'id' => 'loantracker',
@@ -37,7 +48,6 @@ $config = [
         '@app' => dirname(__DIR__),
         '@webroot' => dirname(__DIR__, 2),
         '@web' => '',
-        '@runtime' => dirname(__DIR__) . '/runtime',
     ],
     'components' => [
         // hostInfo is pinned to a fixed trusted value rather than Yii's
@@ -48,6 +58,7 @@ $config = [
         // app generates, including the login-redirect Location header.
         // See CODEBASE.md Phase 9 for the full write-up.
         'request' => [
+            'class' => \app\components\Request::class,
             'cookieValidationKey' => env('COOKIE_VALIDATION_KEY'),
             'hostInfo' => env('APP_HOST_INFO'),
             // Trust X-Forwarded-For/-Proto only from the proxy's own
@@ -74,6 +85,9 @@ $config = [
             'errorAction' => 'site/error',
         ],
         'user' => [
+            // Custom subclass so the dashboard's once-a-second poll cannot keep
+            // re-arming the idle timeout - see app\components\WebUser.
+            'class' => 'app\components\WebUser',
             'identityClass' => 'app\models\User',
             'enableAutoLogin' => false,
             'loginUrl' => ['site/login'],
@@ -81,13 +95,43 @@ $config = [
             // the brief). yii\web\User enforces it itself per request via a
             // session-stored timestamp, so no separate cron/GC is needed.
             'authTimeout' => 1800,
+            // Absolute session ceiling: a session is force-logged-out this
+            // long after login regardless of activity. Originally needed
+            // because the idle timeout above is renewed on every request and
+            // the dashboard poller renewed it perpetually, so the idle timeout
+            // could never fire for an open tab. That specific hole is closed
+            // now - app\components\WebUser suppresses renewal for the poll
+            // route, and the poller backs off 5s..45s rather than running flat
+            // out (2026-10-19) - but this ceiling is kept on its own merit as a
+            // hard cap. Unlike authTimeout, this is written
+            // once at login (yii\web\User::switchIdentity) and never renewed
+            // (renewAuthStatus only reads it), so it's a true hard cap - a
+            // walked-away unlocked session can't stay alive indefinitely.
+            // 12h covers a long working day; staff re-login each morning.
+            'absoluteAuthTimeout' => 43200,
         ],
-        // File-based sessions under the project's own runtime dir (not
-        // PHP's system-wide path) so session data is easy to find/clear in
-        // dev and isolated from other apps on the host.
+        // Session storage depends on the save handler the pool gives us.
+        // On prod the loan FPM pool sets `session.save_handler = redis`
+        // pointing at the loan KeyDB (127.0.0.1:6381 db1), which is
+        // active-active replicated between both app nodes - so a session
+        // created on one node is readable on the other and a login survives
+        // whichever node the reverse proxy picks. Previously sessions were
+        // per-node files, which split logins ~50/50 across the two nodes.
+        // Where the handler is still `files` (dev, or any host without the
+        // pool override) they stay under the project's own runtime dir, so
+        // session data is easy to find/clear and isolated from other apps.
+        // The guard matters: Session::setSavePath() only accepts a real
+        // directory and would throw on a tcp:// URL, so Yii must not call
+        // session_save_path() at all under the redis handler.
         'session' => [
             'class' => 'yii\web\Session',
-            'savePath' => '@runtime/sessions',
+            ...(ini_get('session.save_handler') === 'files'
+                ? ['savePath' => '@runtime/sessions']
+                : []),
+            // Match user.authTimeout (1800s): PHP's default gc_maxlifetime
+            // (1440s) would otherwise expire sessions 6 minutes early wherever
+            // session GC runs.
+            'timeout' => 1800,
             // Explicit SameSite=Lax, matching the _csrf cookie - makes
             // behavior audit-proof instead of relying on browser defaults.
             'cookieParams' => [

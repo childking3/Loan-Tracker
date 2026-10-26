@@ -1,0 +1,50 @@
+# Per-node file (/etc/apache2/** is not mirrored by lsyncd). Substitute
+# __NODE__ (3 or 4), __IP_WG0__ and __IP_WG1__ with the node's own
+# addresses. The address list MUST be identical to HumHub's vhost
+# (compare /etc/apache2/sites-enabled/humhub.conf): Apache only compares
+# ServerName among vhosts bound to the same address, so a `*:80` vhost
+# here would never be reached and requests would fall through to HumHub.
+# Name this file so it sorts AFTER humhub.conf: the first vhost on an
+# address is the default, and HumHub must stay the default.
+
+<VirtualHost __IP_WG1__:80 __IP_WG0__:80>
+    ServerName cipherlab.duckdns.org
+
+    DocumentRoot /var/www/loan-management
+
+    KeepAlive On
+    KeepAliveTimeout 5
+    ProxyTimeout 60
+
+    <Directory /var/www/loan-management>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    # Application code, .env, uploads, deploy configs: never served.
+    <Directory /var/www/loan-management/protected>
+        Require all denied
+    </Directory>
+
+    # Only the front controller executes; any other .php is refused.
+    <FilesMatch "\.php$">
+        Require all denied
+    </FilesMatch>
+    <Files "index.php">
+        Require all granted
+        SetHandler "proxy:unix:/run/php/loan-fpm.sock|fcgi://localhost"
+        ProxyFCGIBackendType FPM
+    </Files>
+
+    <DirectoryMatch "^/var/www/loan-management/static">
+        <FilesMatch "\.(css|js|png|jpg|jpeg|svg|ico|woff2?)$">
+            Header set Cache-Control "public, max-age=3600"
+        </FilesMatch>
+    </DirectoryMatch>
+
+    # Per-node log names: /var/log is mirrored between the nodes, so a
+    # shared name would be overwritten by the peer.
+    ErrorLog  ${APACHE_LOG_DIR}/loan-error-node__NODE__.log
+    CustomLog ${APACHE_LOG_DIR}/loan-access-node__NODE__.log combined
+</VirtualHost>

@@ -24,7 +24,19 @@ class m260910_190700_seed_admin_user extends Migration
             'username' => 'admin',
             'email' => 'nelsonsmith681@gmail.com',
             'password_hash' => '$2y$13$trnCNNtwZ0ue8q/T4Q4pWuDy45w.S6HF2GUjWz7M.S4OGCloRc8H.',
-            'auth_key' => '1eb4cddf98fac08debe839640347354d',
+            // Was a literal, committed value until the 2026-09-28 audit
+            // flagged it: auth_key is the secret User::validateAuthKey()
+            // checks against Yii's identity cookie for "remember me"
+            // auto-login. Currently inert (web.php has enableAutoLogin =
+            // false), but a fixed, permanently-in-git value would become a
+            // known cookie-forging secret for the one account that matters
+            // most the moment that ever changes. Generated fresh on every
+            // run instead, so a new environment (a fresh dev box, a
+            // disaster-recovery rebuild) never gets the same known value -
+            // does not affect any environment that already ran this
+            // migration (see CODEBASE.md's 2026-09-28 audit entry for the
+            // already-seeded row).
+            'auth_key' => bin2hex(random_bytes(16)),
             'full_name' => 'System Administrator',
             'status' => 10,
             'created_at' => $now,

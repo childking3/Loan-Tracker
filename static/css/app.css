@@ -509,6 +509,12 @@ tbody tr:hover {
     color: #241b0f;
 }
 
+.muted-note {
+    color: var(--color-muted);
+    font-size: 0.82rem;
+    font-weight: 400;
+}
+
 .pagination .disabled span {
     color: var(--color-muted);
     opacity: 0.5;
@@ -1259,6 +1265,37 @@ button:active, input[type="submit"]:active, .btn:active {
     padding-left: 2.5rem;
 }
 
+/* Date-range and order controls under the customer search box. The
+   inputs here are plain (no leading icon), so undo the search input's
+   left padding for them. .search-bar-wide lifts the 360px cap so the
+   three controls sit in one row on a desktop-width screen; on a phone
+   the grid collapses to one column. */
+.search-bar-wide {
+    max-width: 720px;
+}
+
+.search-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    align-items: end;
+    gap: 0.6rem 1rem;
+    margin-top: 0.75rem;
+}
+
+.search-filters label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    margin: 0;
+    font-size: 0.8rem;
+}
+
+.search-bar .search-filters input,
+.search-bar .search-filters select {
+    padding-left: 0.75rem;
+    margin-bottom: 0;
+}
+
 .record-list {
     list-style: none;
     margin: 0 0 1.5rem;
@@ -1741,4 +1778,230 @@ button:active, input[type="submit"]:active, .btn:active {
      * Nav-open/hamburger rules live in the wider header/nav breakpoint
      * above, not here - see its own docblock for why.
      */
+}
+
+/* Customer detail header (photo/initial beside the name) and the
+   edit-form "current photo" row. Classes rather than inline style="":
+   the CSP is style-src 'self', so inline style attributes are ignored. */
+.person-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.person-header h1 {
+    margin-bottom: 0.2rem;
+}
+
+.record-avatar.record-avatar-lg {
+    width: 3.5rem;
+    height: 3.5rem;
+    font-size: 1.1rem;
+}
+
+.narrow-form {
+    max-width: 480px;
+}
+
+.photo-edit-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: -0.3rem 0 1rem;
+}
+
+.photo-edit-row .checkbox-label {
+    margin: 0;
+}
+
+/*
+ * Replacements for inline style="" attributes.
+ *
+ * The site's CSP is `style-src 'self'` with no 'unsafe-inline', and a nonce
+ * cannot rescue a style *attribute* (nonces apply to <style> elements only -
+ * the browser asks for 'unsafe-hashes' plus a per-declaration hash instead).
+ * So every inline style in the views was silently dead in every browser from
+ * the moment the CSP went in: the markup rendered, the declaration was
+ * dropped, and nothing was logged. Moving them here is the only fix that
+ * does not weaken the policy.
+ *
+ * HumHub was checked as the reference per the standing instruction and
+ * deliberately NOT followed here: its default CSP is
+ * `default-src *; style-src * 'unsafe-inline'` with a script-src that
+ * wildcards every host (protected/humhub/config/web.php), so it simply
+ * permits inline styles. Matching that would mean trading this app's strict
+ * policy for a decorative one. See CODEBASE.md's "Borrowed from HumHub"
+ * section.
+ *
+ * `max-width: 480px` is NOT redefined here - `.narrow-form` above already
+ * does it and was already in use on three forms.
+ */
+
+/* Read-only detail rows (customer/view.php): a small uppercase label above
+   its value, inside a card that is not clickable. */
+.detail-label {
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.detail-value {
+    display: block;
+    font-size: 0.95rem;
+}
+
+.record-card-static {
+    cursor: default;
+}
+
+.record-list-spaced {
+    margin-bottom: 2rem;
+}
+
+/* The row of actions (Edit / Delete) at the right of a detail header. */
+.record-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+/* Muted explanatory text under a form control. `.field-hint` follows a
+   closed </label> and pulls up toward the field above it; `.field-hint-inset`
+   sits inside the label, below the control, so it pushes down instead. */
+.field-hint {
+    margin-top: -0.6rem;
+}
+
+.field-hint-inset {
+    margin-top: 0.3rem;
+}
+
+/* A section heading that starts a new block partway down a form. */
+.section-heading {
+    margin-top: 1.5rem;
+}
+
+/* A badge trailing inline text (the role/status pills in the user list). */
+.badge-inline {
+    margin-left: 0.4rem;
+}
+
+/* The reports grid needs wider columns than the dashboard's default. */
+.quick-actions-grid-wide {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+/* CSV upload card (import/customers.php): a vertical card whose form and
+   label both span its full width. Scoped to the card so the one-off
+   declarations do not become three single-use utility classes. */
+.import-card {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 2rem;
+    max-width: 480px;
+    margin-bottom: 1.5rem;
+}
+
+.import-card > .quick-action-icon {
+    margin-bottom: 1rem;
+}
+
+.import-card form,
+.import-card label {
+    width: 100%;
+}
+
+.import-card button[type="submit"] {
+    margin-top: 0.5rem;
+}
+
+/* A stat tile that links through to a detail page (market balances on the
+   dashboard). Anchors are inline by default, so without display:block the
+   tile collapses and the flex sizing above never applies. */
+a.stat-tile {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+}
+
+a.stat-tile:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+/* Active / Deleted / All tabs on the customers list. */
+.record-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin: 0 0 1rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.record-tab {
+    padding: 0.5rem 1rem;
+    color: var(--color-muted);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+
+.record-tab:hover {
+    color: var(--color-text);
+}
+
+.record-tab.is-active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+}
+
+/* A soft-deleted customer shown in the Deleted/All tab: faded, with a badge
+   and a Restore action in place of the view chevron. */
+.record-card.is-deleted {
+    opacity: 0.62;
+}
+
+.record-card.is-deleted:hover {
+    opacity: 1;
+}
+
+.badge-deleted {
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+    border: 1px solid var(--color-error-border);
+}
+
+.record-action-form {
+    margin-left: auto;
+    align-self: center;
+    flex-shrink: 0;
+}
+
+.btn-restore {
+    padding: 0.4rem 0.9rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: var(--radius-md, 6px);
+    border: 1px solid var(--color-primary);
+    background: var(--color-primary);
+    color: var(--color-header-text, #fff);
+    cursor: pointer;
+}
+
+.btn-restore:hover {
+    background: var(--color-primary-dark);
+}
+
+/* Faded soft-deleted row in a table (markets list), paralleling
+   .record-card.is-deleted for the card lists. */
+tr.is-deleted {
+    opacity: 0.62;
+}
+
+tr.is-deleted:hover {
+    opacity: 1;
 }

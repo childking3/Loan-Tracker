@@ -1,0 +1,18 @@
+[Unit]
+Description=Loan app PHP-FPM (dedicated master, separate from HumHub's php8.4-fpm)
+After=network.target
+
+[Service]
+Type=simple
+Environment=PHP_INI_SCAN_DIR=/etc/php/8.4/loan/conf.d
+# No RuntimeDirectory=: systemd re-owns such a directory to root on every
+# reload, which locked the workers (loanapp) out of their own sessions.
+ExecStartPre=/bin/sh -c 'install -d -m 0750 -o loanapp -g loanapp /run/loan-app /run/loan-app/sessions /run/loan-app/logs /run/loan-app/tmp /run/loan-app/cli; chown -R loanapp:loanapp /run/loan-app'
+ExecStart=/usr/sbin/php-fpm8.4 --nodaemonize --fpm-config /etc/php/8.4/loan/php-fpm.conf --php-ini /etc/php/8.4/loan/php.ini
+ExecReload=/bin/kill -USR2 $MAINPID
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

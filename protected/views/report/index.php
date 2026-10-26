@@ -25,7 +25,7 @@ $reports = [
 ?>
 <h1>Reports</h1>
 
-<div class="quick-actions-grid" style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));">
+<div class="quick-actions-grid quick-actions-grid-wide">
     <?php foreach ($reports as $report): ?>
         <?= Html::a('<span class="quick-action-icon"><svg class="icon" viewBox="0 0 24 24">' . $report['icon'] . '</svg></span>' . Html::encode($report['label']), [$report['route']], ['class' => 'quick-action']) ?>
     <?php endforeach; ?>

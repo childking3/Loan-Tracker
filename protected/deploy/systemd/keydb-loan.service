@@ -1,0 +1,17 @@
+[Unit]
+Description=KeyDB instance dedicated to the loan app (port 6381)
+After=network.target
+
+[Service]
+Type=simple
+User=keydb
+Group=keydb
+RuntimeDirectory=keydb-loan
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/keydb-server /etc/keydb/loan.conf --daemonize no
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

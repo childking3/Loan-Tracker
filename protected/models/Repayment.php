@@ -7,14 +7,22 @@ use yii\db\ActiveQuery;
 use yii\db\ActiveRecord;
 
 /**
- * ActiveRecord for the repayment table: an append-only ledger. There is no
- * update or delete action anywhere in this application for this model, by
- * design - correcting a mistaken entry means recording a new row, not
- * editing history. Accordingly TimestampBehavior only touches created_at
- * (the table has no updated_at column at all).
+ * ActiveRecord for the repayment table. There is still no delete action
+ * anywhere in this application for this model - a repayment is never
+ * removed. As of 2026-09-28 it CAN be edited (RepaymentController::
+ * actionUpdate(), gated by manageLoans, not the manageRepayments staff use
+ * to record one), to correct a mistaken amount or date after the fact,
+ * with every edit written to the audit log (old value/new value) rather
+ * than silently overwritten - see CODEBASE.md for the decision. Accordingly
+ * TimestampBehavior still only touches created_at; there's deliberately no
+ * updated_at column, since "was this edited" is answered by the audit log,
+ * not a timestamp on the row (matches how Loan/Customer/Guarantor edits
+ * work app-wide).
  */
 class Repayment extends ActiveRecord
 {
+    use IncludesTrashedRelations;
+
     public static function tableName(): string
     {
         return '{{%repayment}}';
@@ -38,7 +46,8 @@ class Repayment extends ActiveRecord
             [['loan_id', 'amount', 'payment_date'], 'required'],
             ['loan_id', 'integer'],
             ['amount', 'number', 'min' => 0.01],
-            ['payment_date', 'date', 'format' => 'php:Y-m-d'],
+            // strictDateFormat: see Loan::rules() - string comparisons downstream need zero-padded dates.
+            ['payment_date', 'date', 'format' => 'php:Y-m-d', 'strictDateFormat' => true],
             // Upper bound only, to stop a future-dated payment from
             // corrupting date-range reports or making getRemainingBalance()
             // show a loan as paid off early. No lower bound - a payment
@@ -63,6 +72,7 @@ class Repayment extends ActiveRecord
 
     public function getRecordedByStaff(): ActiveQuery
     {
-        return $this->hasOne(User::class, ['id' => 'recorded_by_staff_id']);
+        // Includes a soft-deleted staff account so reports still print who recorded it.
+        return $this->hasOneIncludingTrashed(User::findWithDeleted(), ['id' => 'recorded_by_staff_id']);
     }
 }

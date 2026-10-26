@@ -8,7 +8,7 @@ use yii\helpers\Html;
 ?>
 <?= $this->render('//_error_list', ['model' => $model]) ?>
 
-<?= Html::beginForm(null, 'post', ['style' => 'max-width: 480px;']) ?>
+<?= Html::beginForm(null, 'post', ['class' => 'narrow-form']) ?>
     <label><?= Html::encode($model->getAttributeLabel('name')) ?>
         <?= Html::activeTextInput($model, 'name') ?>
     </label>
@@ -18,9 +18,6 @@ use yii\helpers\Html;
     <label><?= Html::encode($model->getAttributeLabel('assigned_staff_id')) ?>
         <?= Html::activeDropDownList($model, 'assigned_staff_id', $staffOptions, ['prompt' => '— Unassigned —']) ?>
     </label>
-    <label class="checkbox-label">
-        <?= Html::activeCheckbox($model, 'is_active', ['label' => null]) ?>
-        <span><?= Html::encode($model->getAttributeLabel('is_active')) ?></span>
-    </label>
+    <?= $this->render('//_is_active_checkbox', ['model' => $model]) ?>
     <?= Html::submitButton('Save Market') ?>
 <?= Html::endForm() ?>

@@ -3,6 +3,7 @@
 namespace app\models;
 
 use app\components\DashboardCache;
+use app\helpers\WorkingDays;
 use Yii;
 use yii\behaviors\TimestampBehavior;
 use yii\db\ActiveQuery;
@@ -25,6 +26,9 @@ use yii\db\ActiveRecord;
  */
 class Loan extends ActiveRecord
 {
+    use HasAssignedStaff;
+    use IncludesTrashedRelations;
+
     /**
      * Every value the `status` enum column accepts. Was previously
      * copied as a literal array in both LoanController::actionIndex()
@@ -51,7 +55,12 @@ class Loan extends ActiveRecord
         return [
             [['customer_id', 'package_id', 'start_date', 'assigned_staff_id'], 'required'],
             [['customer_id', 'package_id', 'assigned_staff_id'], 'integer'],
-            ['start_date', 'date', 'format' => 'php:Y-m-d'],
+            // strictDateFormat: without it "2026-9-2" passes, and the controllers
+            // compare these dates as plain strings ("2026-9-2" > "2026-09-15").
+            ['start_date', 'date', 'format' => 'php:Y-m-d', 'strictDateFormat' => true],
+            // Year bounds keep WorkingDays::add() and the DATE column in range.
+            ['start_date', 'compare', 'compareValue' => '2000-01-01', 'operator' => '>=', 'message' => 'Start date is too far in the past.'],
+            ['start_date', 'compare', 'compareValue' => '2100-12-31', 'operator' => '<=', 'message' => 'Start date is too far in the future.'],
             ['customer_id', 'exist', 'targetClass' => Customer::class, 'targetAttribute' => 'id'],
             ['package_id', 'exist', 'targetClass' => LoanPackage::class, 'targetAttribute' => 'id'],
             ['assigned_staff_id', 'exist', 'targetClass' => User::class, 'targetAttribute' => 'id'],
@@ -76,9 +85,15 @@ class Loan extends ActiveRecord
         }
     }
 
+    /**
+     * Includes a soft-deleted customer: the loan and its history stay, so
+     * every list/report/dashboard row that prints the customer's name must
+     * still resolve one (Customer::find() alone hides deleted rows, which
+     * made loan/index and the dashboard throw "property on null").
+     */
     public function getCustomer(): ActiveQuery
     {
-        return $this->hasOne(Customer::class, ['id' => 'customer_id']);
+        return $this->hasOneIncludingTrashed(Customer::findWithTrashed(), ['id' => 'customer_id']);
     }
 
     public function getPackage(): ActiveQuery
@@ -86,10 +101,7 @@ class Loan extends ActiveRecord
         return $this->hasOne(LoanPackage::class, ['id' => 'package_id']);
     }
 
-    public function getAssignedStaff(): ActiveQuery
-    {
-        return $this->hasOne(User::class, ['id' => 'assigned_staff_id']);
-    }
+    /** Includes a soft-deleted staff account, for the same reason as getCustomer(). */
 
     public function getGuarantors(): ActiveQuery
     {
@@ -140,16 +152,40 @@ class Loan extends ActiveRecord
      * Copies terms from the selected package and computes the expected
      * completion date from start_date. Must be called, with an active
      * package, before save() on a new loan.
+     *
+     * The package's repayment period counts working days (Monday-Friday) -
+     * repayments aren't collected on Saturdays and Sundays - so the
+     * expected completion date skips weekends (see WorkingDays).
      */
     public function applyPackageTerms(LoanPackage $package): void
     {
         $this->principal_amount = $package->loan_amount;
         $this->total_repayment = $package->total_repayment;
         $this->daily_payment = $package->daily_payment;
-        $this->expected_completion_date = date(
-            'Y-m-d',
-            strtotime($this->start_date . " +{$package->repayment_period_days} days")
-        );
+        $this->expected_completion_date = WorkingDays::add($this->start_date, (int) $package->repayment_period_days);
+    }
+
+    /**
+     * How many working days this loan was issued to run for. The package
+     * isn't consulted: a package's period can be edited after a loan is
+     * issued, but the loan keeps the period it was issued with, and that
+     * period is exactly what its own start and expected completion dates
+     * encode.
+     */
+    public function scheduledWorkingDays(): int
+    {
+        return WorkingDays::between($this->start_date, $this->expected_completion_date);
+    }
+
+    /**
+     * Moves the schedule to a new start date, keeping the loan's own
+     * period (see scheduledWorkingDays()). Caller saves.
+     */
+    public function rescheduleFrom(string $newStartDate): void
+    {
+        $period = $this->scheduledWorkingDays();
+        $this->start_date = $newStartDate;
+        $this->expected_completion_date = WorkingDays::add($newStartDate, $period);
     }
 
     public function beforeSave($insert)
@@ -194,7 +230,9 @@ class Loan extends ActiveRecord
         )->bindValue(':id', $this->id)->queryScalar();
 
         $balance = round((float) $this->total_repayment - $paid, 2);
-        Yii::$app->cache->set(self::balanceCacheKey($this->id), $balance, 86400);
+        // Short TTL on purpose: with two app nodes each node has its own KeyDB, and a
+        // repayment only invalidates the local node's copy. 60s bounds cross-node staleness.
+        Yii::$app->cache->set(self::balanceCacheKey($this->id), $balance, 60);
 
         return $balance;
     }
@@ -237,6 +275,47 @@ class Loan extends ActiveRecord
     public static function invalidateBalanceCache(int $loanId): void
     {
         Yii::$app->cache->delete(self::balanceCacheKey($loanId));
+    }
+
+    /**
+     * Keeps status truthful against a freshly-computed (never cached)
+     * remaining balance, for any action that can move that balance after
+     * the fact - currently only editing a repayment (RepaymentController::
+     * actionUpdate() and, for the one-directional "just paid off" case,
+     * actionCreate()). Mutates $this->status and returns whether it
+     * actually changed; the caller owns save()/audit()/cache-invalidation,
+     * same division of responsibility as applyPackageTerms()/
+     * rescheduleFrom() above.
+     *
+     * 'cancelled' is left untouched on purpose: cancelling a loan is a
+     * deliberate manual decision elsewhere, and a balance correction must
+     * never silently resurrect it back into 'active'.
+     *
+     * LoanController::actionUpdate() has its own narrower active<->overdue
+     * flip for a package/start-date edit; it never needs the "paid off"/
+     * "un-paid" transitions this method adds; because a package or start
+     * date can only be changed before any repayment exists, so that
+     * balance is always the package's full one, unpaid. Not
+     * consolidated into that call site in this pass - it's an already
+     * live, already-tested path, and this method's "completed" transition
+     * doesn't apply to it.
+     */
+    public function syncStatusFromBalance(float $remaining): bool
+    {
+        if ($this->status === 'cancelled') {
+            return false;
+        }
+
+        $newStatus = $remaining <= 0.0
+            ? 'completed'
+            : ($this->expected_completion_date < date('Y-m-d') ? 'overdue' : 'active');
+
+        if ($newStatus === $this->status) {
+            return false;
+        }
+
+        $this->status = $newStatus;
+        return true;
     }
 
     private static function balanceCacheKey(int $loanId): string

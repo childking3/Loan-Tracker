@@ -1,0 +1,4 @@
+# /etc/cron.d/loan-management
+# 03:15 server time (Europe/Berlin) = 01:15 or 02:15 UTC; the app's own
+# "today" is UTC, so this is always after the UTC date has rolled over.
+15 3 * * * root /usr/local/bin/loan-mark-overdue

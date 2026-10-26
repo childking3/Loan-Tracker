@@ -45,9 +45,9 @@ $canManageAllRoles = \Yii::$app->user->can('manageUsers');
             <div class="record-details">
                 <span class="record-name">
                     <?= Html::encode($user->full_name) ?>
-                    <span class="badge <?= $roleBadgeClass[$role] ?? 'badge-active' ?>" style="margin-left:0.4rem;"><?= Html::encode($roleLabel[$role] ?? $role) ?></span>
+                    <span class="badge <?= $roleBadgeClass[$role] ?? 'badge-active' ?> badge-inline"><?= Html::encode($roleLabel[$role] ?? $role) ?></span>
                     <?php if ($user->status !== User::STATUS_ACTIVE): ?>
-                        <span class="badge badge-overdue" style="margin-left:0.4rem;">Deactivated</span>
+                        <span class="badge badge-overdue badge-inline">Deactivated</span>
                     <?php endif; ?>
                 </span>
                 <span class="record-meta">
@@ -63,20 +63,20 @@ $canManageAllRoles = \Yii::$app->user->can('manageUsers');
                     </span>
                 </span>
             </div>
-            <div style="display:flex; align-items:center; gap:0.5rem; flex-shrink:0;">
+            <div class="record-actions">
                 <?php if ($canManageAllRoles || $role === User::ROLE_STAFF): ?>
                     <?= Html::a('Edit', ['user/update', 'id' => $user->id]) ?>
                     <?php if ($user->id !== \Yii::$app->user->id): ?>
                         <?php if ($user->status === User::STATUS_ACTIVE): ?>
                             <?= Html::beginForm(['user/deactivate', 'id' => $user->id], 'post', ['class' => 'inline-form']) ?>
-                                <?= Html::submitButton('Deactivate', ['onclick' => "return confirm('Deactivate this staff account? This can be undone from here afterward.');"]) ?>
+                                <?= Html::submitButton('Deactivate', ['data-confirm' => 'Deactivate this staff account? This can be undone from here afterward.']) ?>
                             <?= Html::endForm() ?>
                         <?php else: ?>
                             <?= Html::beginForm(['user/activate', 'id' => $user->id], 'post', ['class' => 'inline-form']) ?>
                                 <?= Html::submitButton('Reactivate') ?>
                             <?= Html::endForm() ?>
                             <?= Html::beginForm(['user/delete', 'id' => $user->id], 'post', ['class' => 'inline-form']) ?>
-                                <?= Html::submitButton('Delete', ['onclick' => "return confirm('Permanently delete this staff account? This cannot be undone from here - do this only once you are sure they will not be reactivated.');"]) ?>
+                                <?= Html::submitButton('Delete', ['data-confirm' => 'Permanently delete this staff account? This cannot be undone from here - do this only once you are sure they will not be reactivated.']) ?>
                             <?= Html::endForm() ?>
                         <?php endif; ?>
                     <?php endif; ?>

@@ -4,6 +4,7 @@ namespace app\controllers;
 
 use app\components\CsvExporter;
 use app\helpers\RequestHelper;
+use app\helpers\WorkingDays;
 use app\models\Customer;
 use app\models\Loan;
 use app\models\Repayment;
@@ -52,11 +53,28 @@ class ReportController extends Controller
      */
     public function actionCustomers()
     {
-        $header = ['Name', 'Phone', 'Loan Count', 'Total Borrowed', 'Outstanding'];
+        $header = ['Name', 'Phone', 'Gender', 'Registered', 'Loan Count', 'Total Borrowed', 'Outstanding'];
 
         // with('loans'): one query for all loans on the page (WHERE
         // customer_id IN (...)) instead of one Loan::find() per customer.
-        $query = Customer::find()->with('loans')->orderBy(['full_name' => SORT_ASC]);
+        // Newest registration first, matching the customer list - the
+        // client wants customers arranged by date, not alphabetically.
+        $query = Customer::find()->with('loans')->orderBy(['created_at' => SORT_DESC, 'id' => SORT_DESC]);
+
+        // Registration-date range, same from/to shape as the other
+        // reports. created_at is an integer timestamp, hence the parsed
+        // day boundaries rather than dateRangeQuery()'s date-column compare.
+        $from = RequestHelper::dateGet('from');
+        $to = RequestHelper::dateGet('to');
+        if ($from !== '' && $to !== '' && $from > $to) {
+            [$from, $to] = [$to, $from];
+        }
+        if ($from !== '') {
+            $query->andWhere(['>=', 'created_at', strtotime($from . ' 00:00:00')]);
+        }
+        if ($to !== '') {
+            $query->andWhere(['<=', 'created_at', strtotime($to . ' 23:59:59')]);
+        }
         $dataProvider = new ActiveDataProvider(['query' => $query, 'pagination' => ['pageSize' => 50]]);
 
         $pageCustomers = $dataProvider->getModels();
@@ -69,7 +87,10 @@ class ReportController extends Controller
         $balances = Loan::remainingBalancesFor($pageLoans);
         $rows = array_map(fn (Customer $c) => $this->customerRow($c, $balances), $pageCustomers);
 
-        return $this->respond('customers', $header, $this->customerCsvRows($query), $rows, ['dataProvider' => $dataProvider]);
+        return $this->respond('customers', $header, $this->customerCsvRows($query), $rows, [
+            'dataProvider' => $dataProvider,
+            'filters' => ['from' => $from, 'to' => $to],
+        ]);
     }
 
     /**
@@ -90,6 +111,8 @@ class ReportController extends Controller
         return [
             $customer->full_name,
             $customer->phone,
+            $customer->gender !== null ? (Customer::GENDERS[$customer->gender] ?? $customer->gender) : '',
+            date('Y-m-d', $customer->created_at),
             count($loans),
             round($totalBorrowed, 2),
             round($outstanding, 2),
@@ -165,8 +188,8 @@ class ReportController extends Controller
         [$from, $to, $query] = $this->dateRangeQuery(
             Repayment::find(),
             'payment_date',
-            RequestHelper::scalarGet('from'),
-            RequestHelper::scalarGet('to')
+            RequestHelper::dateGet('from'),
+            RequestHelper::dateGet('to')
         );
         $query->with(['loan.customer', 'recordedByStaff'])->orderBy(['payment_date' => SORT_DESC, 'created_at' => SORT_DESC]);
 
@@ -251,7 +274,7 @@ class ReportController extends Controller
     {
         $query = Loan::find()->with(['customer', 'assignedStaff'])->andWhere(['status' => 'overdue'])->orderBy(['expected_completion_date' => SORT_ASC]);
 
-        $header = ['Loan Number', 'Customer', 'Remaining Balance', 'Expected Completion', 'Days Overdue', 'Assigned Staff'];
+        $header = ['Loan Number', 'Customer', 'Remaining Balance', 'Expected Completion', 'Working Days Overdue', 'Assigned Staff'];
         $dataProvider = new ActiveDataProvider(['query' => $query, 'pagination' => ['pageSize' => 50]]);
 
         $pageLoans = $dataProvider->getModels();
@@ -266,7 +289,9 @@ class ReportController extends Controller
      */
     private function overdueRow(Loan $loan, array $balances): array
     {
-        $daysOverdue = (int) ((strtotime(date('Y-m-d')) - strtotime($loan->expected_completion_date)) / 86400);
+        // Working days (Mon-Fri) past the expected completion date, like the
+        // schedule itself - weekends never count.
+        $daysOverdue = WorkingDays::between($loan->expected_completion_date, date('Y-m-d'));
 
         return [
             $loan->loan_number,
@@ -297,8 +322,8 @@ class ReportController extends Controller
         [$from, $to, $query] = $this->dateRangeQuery(
             Repayment::find(),
             'payment_date',
-            RequestHelper::scalarGet('from'),
-            RequestHelper::scalarGet('to')
+            RequestHelper::dateGet('from'),
+            RequestHelper::dateGet('to')
         );
 
         $data = $query
@@ -330,23 +355,11 @@ class ReportController extends Controller
      */
     public function actionStaff()
     {
-        // Replaces 3 queries per staff row (in a PHP loop, scaling
-        // linearly with headcount) with one pass using the same
-        // correlated-subquery shape as DashboardCache::computeTotals(),
-        // extended with an overdue_loans subquery since this report shows
-        // both.
-        [$excludeAdmins, $adminParams] = User::excludeAdminsSql('u');
-        $params = array_merge([':active' => 'active', ':overdue' => 'overdue', ':statusActive' => User::STATUS_ACTIVE], $adminParams);
-
-        $data = Yii::$app->db->createCommand(
-            'SELECT u.full_name,
-                    (SELECT COUNT(*) FROM {{%loan}} l WHERE l.assigned_staff_id = u.id AND l.status = :active) AS active_loans,
-                    (SELECT COUNT(*) FROM {{%loan}} l WHERE l.assigned_staff_id = u.id AND l.status = :overdue) AS overdue_loans,
-                    (SELECT COALESCE(SUM(r.amount), 0) FROM {{%repayment}} r WHERE r.recorded_by_staff_id = u.id) AS total_collected
-             FROM {{%user}} u
-             WHERE u.status = :statusActive' . $excludeAdmins . '
-             ORDER BY u.full_name'
-        )->bindValues($params)->queryAll();
+        // Shared with DashboardCache::computeTotals() via
+        // User::staffPerformanceRows() (consolidated 2026-09-18 - see its
+        // own docblock) - this report just reads overdue_loans too, which
+        // the dashboard ignores.
+        $data = User::staffPerformanceRows();
 
         $rows = [];
         foreach ($data as $row) {

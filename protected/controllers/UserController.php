@@ -79,9 +79,9 @@ class UserController extends Controller
         $model->scenario = User::SCENARIO_CREATE;
         $model->status = User::STATUS_ACTIVE;
 
-        $model->avatarFile = UploadedFile::getInstanceByName('User[avatarFile]');
-
         $loaded = $model->load(Yii::$app->request->post());
+        // After load(), not before: see User::$avatarFile's docblock.
+        $model->avatarFile = UploadedFile::getInstanceByName('User[avatarFile]');
         if ($loaded && !$this->canManageAllRoles()) {
             // Enforced here, not just left to the create form hiding the
             // dropdown - a direct POST could otherwise submit role=admin.
@@ -92,22 +92,48 @@ class UserController extends Controller
         if ($loaded && $model->validate()) {
             $model->setPassword((string) $model->password);
             $model->generateAuthKey();
-            $model->save(false);
-            $this->assignRole((int) $model->id, $model->role);
 
-            if ($model->avatarFile !== null) {
-                $model->saveAvatar($model->avatarFile);
+            // save() + role assignment + audit share one transaction (they
+            // didn't before - an unguarded exception between them, e.g. a
+            // Galera hiccup on the auth_assignment insert, could commit a
+            // new account with no role and no audit trail). authManager
+            // uses the same 'db' component (config/common.php), so
+            // assignRole()'s writes genuinely participate in this.
+            $transaction = Yii::$app->db->beginTransaction();
+            try {
+                $model->save(false);
+                $this->assignRole((int) $model->id, $model->role);
+                AuditLogger::audit('user_create', 'user', $model->id, null, [
+                    'username' => $model->username,
+                    'email' => $model->email,
+                    'full_name' => $model->full_name,
+                    'role' => $model->role,
+                    'status' => $model->status,
+                ]);
+                $transaction->commit();
+            } catch (\Throwable $e) {
+                $transaction->rollBack();
+                throw $e;
             }
 
-            AuditLogger::audit('user_create', 'user', $model->id, null, [
-                'username' => $model->username,
-                'email' => $model->email,
-                'full_name' => $model->full_name,
-                'role' => $model->role,
-                'status' => $model->status,
-            ]);
+            // Outside the transaction and separately guarded, same reasoning
+            // as CustomerController's photo save: a storage failure here
+            // (confirmed reachable - AvatarStorage::save() throws even past
+            // FileValidator, on a file that only looks like an image) must
+            // not undo an otherwise-valid account, and must not leave the
+            // account created with zero audit trail the way an uncaught
+            // exception here used to.
+            $avatarFailed = false;
+            if ($model->avatarFile !== null) {
+                try {
+                    $model->saveAvatar($model->avatarFile);
+                } catch (\Throwable $e) {
+                    Yii::error('Staff avatar not stored: ' . (string) $e, __METHOD__);
+                    $avatarFailed = true;
+                }
+            }
 
-            Yii::$app->session->setFlash('success', 'Staff account created.');
+            Yii::$app->session->setFlash('success', 'Staff account created.' . ($avatarFailed ? ' The photo could not be saved - try again from Edit.' : ''));
             return $this->redirect(['index']);
         }
 
@@ -128,11 +154,9 @@ class UserController extends Controller
         $oldAttributes = $model->getAttributes();
         $oldRole = $model->role;
 
-        if (Yii::$app->request->isPost) {
-            $model->avatarFile = UploadedFile::getInstanceByName('User[avatarFile]');
-        }
-
         if ($model->load(Yii::$app->request->post())) {
+            // After load(), not before: see User::$avatarFile's docblock.
+            $model->avatarFile = UploadedFile::getInstanceByName('User[avatarFile]');
             if (!$this->canManageAllRoles()) {
                 // Locked to staff - same reasoning as actionCreate()'s
                 // matching comment. The target was already confirmed
@@ -170,25 +194,44 @@ class UserController extends Controller
                 if ($model->password !== null && $model->password !== '') {
                     $model->setPassword($model->password);
                 }
-                $model->save(false);
 
-                if ($model->role !== $oldRole) {
-                    $this->assignRole((int) $model->id, $model->role);
+                // Same reasoning as actionCreate(): save + role reassignment
+                // + audit share one transaction, so a failure partway
+                // through can't leave the account changed with a stale role
+                // or no audit trail.
+                $transaction = Yii::$app->db->beginTransaction();
+                try {
+                    $model->save(false);
+
+                    if ($model->role !== $oldRole) {
+                        $this->assignRole((int) $model->id, $model->role);
+                    }
+
+                    AuditLogger::audit(
+                        'user_update',
+                        'user',
+                        $model->id,
+                        $oldAttributes + ['role' => $oldRole],
+                        $model->getAttributes() + ['role' => $model->role]
+                    );
+                    $transaction->commit();
+                } catch (\Throwable $e) {
+                    $transaction->rollBack();
+                    throw $e;
                 }
 
+                // Outside the transaction, best-effort - see actionCreate().
+                $avatarFailed = false;
                 if ($model->avatarFile !== null) {
-                    $model->saveAvatar($model->avatarFile);
+                    try {
+                        $model->saveAvatar($model->avatarFile);
+                    } catch (\Throwable $e) {
+                        Yii::error('Staff avatar not stored: ' . (string) $e, __METHOD__);
+                        $avatarFailed = true;
+                    }
                 }
 
-                AuditLogger::audit(
-                    'user_update',
-                    'user',
-                    $model->id,
-                    $oldAttributes + ['role' => $oldRole],
-                    $model->getAttributes() + ['role' => $model->role]
-                );
-
-                Yii::$app->session->setFlash('success', 'Staff account updated.');
+                Yii::$app->session->setFlash('success', 'Staff account updated.' . ($avatarFailed ? ' The photo could not be saved - try again from Edit.' : ''));
                 return $this->redirect(['index']);
             }
         }
@@ -342,10 +385,17 @@ class UserController extends Controller
      * One market's name per user id that's assigned to a market - batched
      * for the listing the same way currentRoles() is, rather than one
      * query per row. A staff id could in theory be assigned to more than
-     * one active market (nothing in the schema prevents it - see
-     * MARKETS_REDESIGN_REVIEW.md's open item on this); this picks
+     * one active market (nothing in the schema prevents it - client
+     * confirmed 2026-09-17 this is intentionally unenforced); this picks
      * whichever row the query returns first for that id, same defined-but-
      * arbitrary tie-break the customer-create market default uses.
+     *
+     * Raw SQL, not Market::find() - excludes deleted_at IS NULL explicitly
+     * below rather than through Market's own find() override, since this
+     * only needs 2 columns across possibly many ids in one query. Fixed by
+     * the 2026-09-18 security audit: this used to omit the deleted_at
+     * filter entirely, so a staff member's Staff-list row kept showing a
+     * market's name after that market was soft-deleted out from under it.
      *
      * @param int[] $userIds
      * @return array<int, string> market name keyed by user id
@@ -357,7 +407,7 @@ class UserController extends Controller
         }
 
         $rows = Yii::$app->db->createCommand(
-            'SELECT assigned_staff_id, name FROM {{%market}} WHERE assigned_staff_id IN (' . implode(',', $userIds) . ')'
+            'SELECT assigned_staff_id, name FROM {{%market}} WHERE assigned_staff_id IN (' . implode(',', $userIds) . ') AND deleted_at IS NULL'
         )->queryAll();
 
         $names = [];

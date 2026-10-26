@@ -22,4 +22,21 @@ final class RequestHelper
         $value = Yii::$app->request->get($param, $default);
         return is_string($value) ? $value : $default;
     }
+
+    /**
+     * A `?from=`/`?to=` style date filter, strictly Y-m-d: returns the
+     * normalised date, or '' for anything else (missing, malformed, an
+     * impossible date like 2026-02-31). Callers that compare against an
+     * integer timestamp column need a real date, not just a string.
+     */
+    public static function dateGet(string $param): string
+    {
+        $raw = self::scalarGet($param);
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
+        if ($date === false || $date->format('Y-m-d') !== $raw) {
+            return '';
+        }
+
+        return $raw;
+    }
 }

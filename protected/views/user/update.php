@@ -16,7 +16,7 @@ $this->title = 'Edit ' . $model->full_name;
 
 <?= $this->render('//_error_list', ['model' => $model]) ?>
 
-<?= Html::beginForm('', 'post', ['enctype' => 'multipart/form-data', 'style' => 'max-width: 480px;']) ?>
+<?= Html::beginForm('', 'post', ['enctype' => 'multipart/form-data', 'class' => 'narrow-form']) ?>
     <?php if ($model->avatar_filename): ?>
         <div>
             <img class="avatar avatar-large" src="<?= Html::encode(\yii\helpers\Url::to(['avatar/view', 'id' => $model->id, 'v' => $model->avatar_filename])) ?>" alt="">
@@ -26,7 +26,7 @@ $this->title = 'Edit ' . $model->full_name;
         <?= Html::fileInput('User[avatarFile]') ?>
     </label>
     <?php if ($model->avatar_filename): ?>
-        <p class="muted" style="margin-top: -0.6rem;">Leave blank to keep the current picture.</p>
+        <p class="muted field-hint">Leave blank to keep the current picture.</p>
     <?php endif; ?>
     <label><?= Html::encode($model->getAttributeLabel('full_name')) ?>
         <?= Html::activeTextInput($model, 'full_name') ?>
@@ -40,14 +40,14 @@ $this->title = 'Edit ' . $model->full_name;
     <label>New password
         <?= Html::activeInput('password', $model, 'password') ?>
     </label>
-    <p class="muted" style="margin-top: -0.6rem;">Leave blank to keep the current password.</p>
+    <p class="muted field-hint">Leave blank to keep the current password.</p>
     <label>Role
         <?php if ($canManageAllRoles): ?>
             <?= Html::activeDropDownList($model, 'role', array_combine(User::ROLES, User::ROLES)) ?>
         <?php else: ?>
             <input type="text" value="Staff" disabled>
             <?= Html::activeHiddenInput($model, 'role', ['value' => User::ROLE_STAFF]) ?>
-            <p class="muted" style="margin-top: 0.3rem;">As a manager, you can't change an account's role above staff - the server also enforces this regardless of what's submitted here.</p>
+            <p class="muted field-hint-inset">As a manager, you can't change an account's role above staff - the server also enforces this regardless of what's submitted here.</p>
         <?php endif; ?>
     </label>
     <label>Status

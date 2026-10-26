@@ -1727,6 +1727,67 @@ a whole app-wide live system, so it uses a fixed 15-second `fetch()` loop
 with none of that machinery - correct for this app's scale, not a
 shortcut taken by accident.
 
+**Checked, one branch adopted in spirit: who may correct a record after it is written**
+(`repayment/update` opened to staff, 2026-10-16). `Content::canEdit()`
+(`modules/content/models/Content.php:910-950`) allows the author of a record to edit it
+(`created_by === $user->id`), and separately allows anyone holding a manage permission on
+the record's *container* to edit anything inside it. This app took the second branch for
+repayments: the loan is the container, and the staff member it is assigned to may
+correct any repayment on it, including ones a colleague or manager recorded - because a
+staff member who inherits a loan would otherwise be unable to fix its history. The
+author-style branch remains available as a narrower alternative if the client prefers it
+(`recorded_by_staff_id === Yii::$app->user->id`), and is recorded as an open judgment
+call rather than silently dismissed. No HumHub code was copied.
+
+**Checked, deliberately not borrowed: ownership as created_by**
+(`customer.assigned_staff_id` + the reassignment control, 2026-10-16). HumHub's closest
+equivalent is Space ownership, and it resolves it the opposite way:
+`Space::getOwnerUser()` is `hasOne(User::class, ['id' => 'created_by'])`
+(`modules/space/models/Space.php:568`), with `USERGROUP_OWNER` derived from the same
+field - so a Space's owner is whoever created it, and transferring ownership would mean
+rewriting an audit column. That works for HumHub because a Space is normally created by
+the person who then runs it. It does not work here: measured against the real data,
+every customer carries `created_by = admin` (the admin registers them all), so the same
+design would have handed admin every customer and the staff none. This app therefore
+keeps `created_by` as pure audit and carries a separate, reassignable
+`assigned_staff_id`, with reassignment restricted to `viewAllCustomers` holders and
+recorded in the existing `customer_update` audit row. No HumHub code was copied; the
+comparison is recorded because the divergence was a deliberate decision backed by
+measurement, not a preference.
+
+**Checked, confirmed, one divergence: list-level visibility scoping**
+(`Customer::scopeVisible()`, added 2026-10-16). Compared against
+`protected/humhub/modules/content/components/ActiveQueryContent.php::readable()`.
+HumHub builds its visibility restriction as SQL on the query itself (`andWhere`), never
+by filtering rows in PHP after fetching; short-circuits the restriction entirely when
+the user holds a view-everything capability (`$user->canManageAllContent()`); and
+expresses access as an OR of several independent ownership paths (space membership OR
+public content OR own profile content). This app's scoping does the same three things
+with its own vocabulary - `viewAllCustomers` is the short-circuit, and the OR is
+"customer is assigned to me" OR "a loan on this customer is assigned to me".
+Deliberate divergence: HumHub reaches its related tables with `leftJoin`s, which here
+would return one customer row per matching loan and force a `DISTINCT` over the whole
+customer list; an `EXISTS` subquery returns each customer exactly once and lets the
+optimizer stop at the first matching loan (confirmed `index_subquery` in EXPLAIN). No
+HumHub code was copied.
+
+**Checked, not borrowed: per-record ownership for staff-scoped visibility**
+(`customer.assigned_staff_id`, added 2026-10-16). Compared against HumHub's content
+ownership model: `protected/humhub/modules/content/models/Content.php` keeps
+`created_by` as the author/audit field and scopes *visibility* by the container
+(`contentcontainer_id`) plus a visibility mode, never by `created_by` itself (see its
+`canView()`/`canEdit()` paths, which compare `created_by` only for edit rights, not for
+listing). That is the same split this app needed and independently confirmed the Phase 0
+measurement: "who created the row" and "whose row it is" are different questions, and
+only the second may drive a listing query. Where this app deliberately diverges: HumHub
+scopes by container alone, with no per-record owner override, because a Space's
+membership defines who sees its content. Here the container equivalent (the market)
+is not sufficient on its own - the client explicitly wants the admin to be able to
+reassign a single customer from one staff member to another without moving that
+customer's whole market - so this app carries an explicit per-customer
+`assigned_staff_id` that the market only *seeds* at backfill time. No HumHub code was
+copied; only the created_by-vs-visibility separation was confirmed against it.
+
 **Adapted: CSV formula-injection sanitization** (`CsvExporter::sanitizeCell()`).
 HumHub's export component,
 `protected/humhub/components/export/SpreadsheetExport.php`, prefixes a
@@ -7235,3 +7296,1709 @@ confirmed. Dashboard totals unchanged from the established baseline
 collections). No test data left behind: the one test market created
 for the soft-delete verification was permanently removed by exact id
 match afterward, along with its orphaned audit-log entity reference.
+
+**Recovery note (2026-09-29):** everything below this line, and several dated sections that
+existed here before it (2026-09-26 client batch, repayment editing, error-handling audit,
+HumHub upload investigation, an earlier domain-rename note), was uncommitted narrative text
+that this file lost when it - along with `index.php` and the stray root `app.css` - vanished
+from the working tree by a cause I could not identify (not any command I ran this session; no
+other Claude session was active on this machine at the time). `index.php`/`app.css` were
+restored byte-for-byte from git (`git checkout HEAD --`); this file's git-committed baseline
+(everything above this note) was restored the same way, but the uncommitted sections written
+since the last commit are gone from here and had to be reconstructed from the session
+transcript rather than git, since git never had them. The underlying code for every feature
+those sections described is unaffected and separately verified (still on disk, matched against
+prod via checksum, or confirmed live via HTTP) - this was a documentation loss, not a code
+loss. See `PRODUCTION_READINESS.md`'s matching 2026-09-29 note.
+
+## 2026-09-28: domain-rename sweep found a live bug, fixed
+
+Followed up the 2026-09-28 domain-rename note above with a full grep sweep for hardcoded
+`cipherlab.duckdns.org` references, rather than assume the nginx-level rename was the whole
+story. Found and fixed:
+
+- **Live bug, both app nodes**: `protected/.env`'s `APP_HOST_INFO` still said
+  `https://cipherlab.duckdns.org`. `web.php` pins Yii's `request.hostInfo` to this value on
+  purpose (anti Host-header-injection hardening, see Phase 9) rather than trusting the incoming
+  Host header - so every absolute URL the app generates was quietly built against the *old*
+  domain while nginx was already serving the *new* one. `.env` is parsed fresh every request
+  (`env.php`'s hand-rolled loader, no cache), so this needed no FPM reload - fixed directly on
+  `.3` and `.4` (`.env` backed up first as `.env.bak-domain-rename-20260928` on each, ownership/
+  perms `root:loanapp 640` preserved, value confirmed changed on both).
+- **Stale deploy templates** (not live, but would reintroduce the bug on any future node rebuild
+  or rollback): `protected/deploy/bootstrap-prod.sh`, `protected/.env.production.example`, and
+  the two prepared nginx configs in `protected/deploy/nginx/` (`lt-cutover.conf`,
+  `loan-upstream-and-test-site.conf` - `server_name`, both cert paths, and the rehearsal site's
+  explicit `Host` header). All updated to `dmcmanagement.duckdns.org`.
+- **Android app** (`loan-staff-android`, sibling repo): `strings.xml`'s `base_url` and the
+  `network_security_config.xml` comment were still hardcoded to the old domain - fixed there too.
+  This one needs a rebuild + reinstall on staff devices to take effect (a resource string, not
+  something the running APK re-reads); not done here, flagged to the client.
+
+Historical narrative entries elsewhere in this file (and in `loan-staff-android/CODEBASE.md`)
+that mention `cipherlab.duckdns.org` were left alone - same reasoning as not rewriting an
+already-applied migration.
+
+## 2026-09-28: full security/performance audit (backend) - phased, 3 agents + verification
+
+Followed the domain-rename sweep with a full codebase audit (security backend, performance
+backend, Android - see `loan-staff-android/CODEBASE.md` for the Android-side fixes), split
+into phases so nothing got lost: Phase 1 was three parallel read-only agents (one per area),
+Phase 2 was synthesizing all three reports myself, verifying each finding against the actual
+code/live behavior rather than trusting the agents' claims, and fixing what was confirmed real.
+Judgment calls (not bugs - decisions) went to `PRODUCTION_READINESS.md` instead of here, per
+the usual split.
+
+**Security agent: no new critical/high findings.** Re-checked every controller's
+`AccessControl` rule ordering (the exact bug class fixed once already in `RepaymentController`)
+for a recurrence - none found. IDOR/per-record authorization, mass assignment, SQL injection,
+XSS, VerbFilter coverage, CSRF, password logging, secrets, transactional audit writes - all
+checked controller-by-controller and confirmed already correctly handled. Two low-severity
+items came out of it; both are judgment calls in `PRODUCTION_READINESS.md`'s 2026-09-28 section
+(login-throttle fail-open behavior during a KeyDB outage - already a documented deliberate
+tradeoff; a hardcoded, git-committed `auth_key` in the admin seed migration).
+
+**Fixed as a direct result:** the admin seed migration
+(`m260910_190700_seed_admin_user.php`) now generates `auth_key` via `bin2hex(random_bytes(16))`
+at run time instead of a literal committed value - affects only a *future* fresh environment,
+since Yii never re-runs a migration that already applied; dev's own already-seeded admin row
+was rotated directly the same way. Currently inert regardless (`enableAutoLogin` is `false`),
+but a permanent known secret for the one account that matters most, sitting in git history, was
+worth closing off before it could ever matter. Prod's existing row still has the old value -
+that's a prod DB write, flagged in `PRODUCTION_READINESS.md` for whenever the client wants it
+done, not done here.
+
+**Performance agent found 3 recurrences of an already-fixed N+1 pattern.**
+`Loan::remainingBalancesFor()` (one batched `GROUP BY` query) already replaced the naive
+per-loan `getRemainingBalance()` loop in `ReportController`/`DashboardCache` a while back, but
+three call sites still had the old per-loan-in-a-loop pattern:
+- `commands/LoanController.php::actionMarkOverdue()` (the nightly overdue cron)
+- `DashboardController::actionStaff()` + `views/dashboard/staff.php` (the per-staff drill-down
+  page)
+- `CustomerController::actionView()` + `views/customer/_loan_table.php` (rendered twice per
+  customer page - active loans, then history)
+
+All three now precompute `Loan::remainingBalancesFor($loans)` in the controller and pass the
+result down instead of calling `getRemainingBalance()` per row. Verified live, not just
+compiled: ran `loan/mark-overdue` cleanly; logged in via curl (admin) and hit both
+`dashboard/staff?id=4` and `customer/view?id=2` over real HTTP - both rendered 200 with real,
+varied balance figures per row (not a uniform 0 from a silently-broken lookup), matching what
+the old per-row calls would have shown.
+
+**Also fixed (performance agent, medium):** `DashboardCache::computeTotals()` was hydrating
+every open (`active`/`overdue`) loan as a full `ActiveRecord` object purely to sum a derived
+number via `remainingBalancesFor()` - correct there because that helper is meant for a page
+that already needs the AR objects for other reasons, wasteful here where nothing else about
+the loan is used. Replaced with one SQL aggregate (`LEFT JOIN` against a per-loan `SUM(amount)`
+subquery, same formula `ReportController::actionOutstanding()` already filters by) - no AR
+hydration at all. Verified by comparing old-vs-new output on live dev data before and after
+(both ₦221,250 - console script + a live `dashboard/poll` HTTP hit after the change, exact
+match).
+
+**Static-asset caching turned out to already be solved on prod, undocumented.** Initially
+(wrongly) concluded from this file plus a dev-box `curl -I` check that `static/css/app.css` had
+no `Cache-Control` at all - dev's Apache has neither the vhost config nor `mod_headers` loaded,
+so it could never have shown this either way. Added a `.htaccess` rule, then discovered while
+verifying the deploy that both prod app nodes' vhost config
+(`/etc/apache2/sites-available/loan-management.conf`) already sets `Cache-Control: public,
+max-age=36000` for `static/`'s css/js/png/jpg/jpeg/svg/ico/woff/woff2 - added at the original
+2026-09-21 go-live cutover, never reflected back into this repo. The `.htaccess` addition was
+dead code (the vhost's more specific `DirectoryMatch` always overrides a broader
+document-root-level `.htaccess` rule for the same header) - removed it and corrected the record
+instead of leaving misleading code in place. See `PRODUCTION_READINESS.md`.
+
+**Also fixed (performance agent, low):** four unreferenced files sitting in the public
+docroot's `static/css/` - `app1.css`, `app3.css` (old CSS drafts, superseded), and two
+multi-megabyte images (`loantracker.jpeg`, `variable_meme.jpeg`) that Apache was serving
+unauthenticated to anyone who guessed the filename, despite nothing in the app linking to
+them. Confirmed zero references anywhere in `protected/` before deleting (both dev and prod -
+prod only had the two CSS files, not the images).
+
+**Confirmed NOT a problem** (performance agent, checked and ruled out): indexes (deliberate
+composite indexes already match every real query shape), RBAC/schema caching (already
+KeyDB-backed, not per-request DB round trips), persistent DB connections, every other
+controller's query batching (`ImportController`, `ReportController`'s export path,
+`CustomerController`, `LoanController`, `RepaymentController`, `GuarantorController`,
+`MarketController`, `UserController`, `LoanPackageController`) - all already correct.
+
+## 2026-09-29: deployed to prod - client batch + repayment editing + error-handling audit + 2026-09-28 audit fixes, all together
+
+Client said "push update to the website" and, when asked which pending batch(es), answered
+"all changes." Took a fresh prod DB backup first (`backup_prod_db.sh` - the first attempt
+silently produced an empty/corrupt dump because the SSH password prompt had no interactive
+terminal in that run; caught by checking the resulting file's size/table count rather than
+trusting the script's own exit code, which was masked anyway by an unrelated `| tail` in the
+outer command; re-ran correctly, verified 13 tables, valid gzip). A `rsync --checksum` dry run
+against prod showed the true pending diff was smaller than expected - the 2026-09-26 client
+batch's own migrations and every supporting file were already live from that earlier deploy;
+what was actually still pending was the repayment-editing feature, the error-handling-audit
+fixes, and the 2026-09-28 security/performance audit's code changes. No new migrations needed
+(`yii migrate/new` confirmed empty on prod both before and after). Copied via the same
+`rsync -rlt --checksum --no-owner --no-group` pattern as the 2026-09-26 deploy, verified
+identical afterward (a second dry run showed zero diff), and confirmed lsyncd mirrored node .3
+to node .4 correctly. Removed `app1.css`/`app3.css` from both nodes' `static/css/` by exact
+filename match (confirmed present and byte-identical to the local copies just deleted, before
+removing). Full HTTP regression against the live public domain afterward: homepage 200, the
+two removed CSS files now 404, `static/css/app.css` still serving its (already-existing, see
+above) `Cache-Control` header correctly.
+
+## 2026-10-02: security hardening - absolute session cap + guarantor-create visibility check
+
+From the 2026-10-02 security/performance audit (`SECURITY_PERFORMANCE_AUDIT.md`). Two security
+fixes applied; the audit's one performance item (dashboard-poll session lock) is deliberately
+held for a separate change at the user's instruction ("security first").
+
+**S1 - absolute session ceiling (`protected/config/web.php`, `user` component).** Added
+`absoluteAuthTimeout => 43200` (12h) alongside the existing `authTimeout => 1800` idle timeout.
+Root cause: `authTimeout` is renewed on every request by `yii\web\User::renewAuthStatus()`, and
+the dashboard (the default post-login landing page) polls once a second, so an open dashboard tab
+renewed `__expire` perpetually and the 30-minute idle timeout never fired for it - a walked-away
+unlocked session could stay authenticated indefinitely. `absoluteAuthTimeout` is the correct lever:
+verified against the framework source that it is written once at login (`switchIdentity()`,
+web/User.php:669-670) and only ever read/checked afterward, never renewed (`renewAuthStatus()`,
+web/User.php:715-723) - a true hard cap that can only ever end a session earlier, never extend one.
+Purely additive, cannot weaken anything. Note: closing the session in the poll endpoint does NOT
+fix this (the `__expire` renewal happens in the AccessControl filter during `beforeAction`, before
+any action body runs), so the absolute cap is the only clean fix; the pure idle timer can't be
+stopped from renewing on the poll without breaking the auth check, which must resolve the identity.
+Existing sessions that predate this change never had `__absoluteExpire` written, so the cap applies
+to new logins going forward - not a regression, just not retroactive.
+
+**S2 - guarantor-create visibility check (`protected/controllers/GuarantorController.php`).**
+Added the `if (!$loan->isVisibleToCurrentUser()) throw new ForbiddenHttpException(...)` check to
+`actionCreate()`, matching every other loan-scoped write (`RepaymentController::actionCreate`,
+`LoanController::actionUpdate`). It was the only such action missing it. A no-op today - the action
+is gated on `manageLoans`, held only by manager/admin, who also hold `viewAllLoans` so the check
+always passes for them - but it closes a latent gap that would become a real IDOR if `manageLoans`
+were ever granted to a more scoped role. Strictly additive: can only ever deny access, never widen
+it, and denies no legitimate user under the current role hierarchy.
+
+**Tested live (manager1, local dev DB):** logged in, confirmed normal multi-request session works
+under the new `absoluteAuthTimeout` (no regression to login/session). Exercised the changed
+guarantor-create path end to end - posted a guarantor to an open loan as the manager, confirmed the
+row was created (i.e. the new visibility check does not block a legitimate manager), then deleted
+the test guarantor and its audit row by exact `full_name`+`phone`+`id` match (never an id-range),
+verified the loan returned to 0 guarantors and no stray audit row remained. Both edited files
+`php -l` clean; app serves 200 on `/` and `/site/login` with the new config. The 12h force-logout
+itself was verified by framework-source reading, not runtime-triggered (would require either a 12h
+wait or a temporary-lower-and-wait that risks leaving a disruptive 3s cap if interrupted).
+
+## 2026-10-03: S1/S2 deployed to production (both app nodes)
+
+Deployed the two 2026-10-02 security fixes (`protected/config/web.php` S1, and
+`protected/controllers/GuarantorController.php` S2) to the production app nodes at the client's
+explicit request. Password SSH only (no keys - SSH is not public-facing; keys were deliberately
+not left on the boxes).
+
+**Method (surgical, 2 files only):** built an md5 manifest of the whole deployable tree locally and
+on node .3, diffed them, and confirmed the *only* functional delta vs prod was exactly S1 and S2
+(diff showed nothing else). Everything else that differed was non-runtime: `protected/deploy/*`
+tooling, Yii framework `*.md`/`.github` docs, and one local dev avatar upload - none deployed.
+The avatar and any uploads were explicitly excluded (per-environment user data, and prod message/
+customer data must never be pulled to local).
+
+**Steps:** backed up both current prod files to `.3:/var/tmp/loan-deploy-backup-20261003/`
+(`/var/tmp` is excluded from lsyncd, so the backup does not propagate); SFTP-uploaded the two files
+to node .3 as `root:root 0644` (atomic temp-write + rename); verified remote md5 == local
+(`5897eb60...` web.php, `9c6b5efb...` GuarantorController.php) and `php -l` clean; graceful-reloaded
+the dedicated `loan-php-fpm` service (USR2 - finishes in-flight requests, loan-only, NOT the shared
+HumHub `php8.4-fpm` pool) because `opcache.validate_timestamps=Off` means changed files are not
+picked up until the pool is refreshed.
+
+**Propagation + second node:** node .3 runs lsyncd (`source=/` -> `root@10.10.10.4:/`, 3s delay),
+so the two files mirrored to .4 automatically - verified .4 md5 matched. Then graceful-reloaded
+`loan-php-fpm` on .4 as well (its opcache also has validate_timestamps off).
+
+**Topology confirmed during deploy:** loan app docroot `/var/www/loan-management`, Apache 2.4.68
+vhost on `:81` (ServerName `cipherlab.duckdns.org`, internal only), dedicated FPM pool
+`/run/php/loan-fpm.sock` (config `/etc/php/8.4/loan/php-fpm.conf`, unit `loan-php-fpm.service`),
+separate from HumHub's `:80` vhost + `php8.4-fpm` pool. Public domain is
+`dmcmanagement.duckdns.org`, fronted by the two nginx+ModSecurity proxies (10.10.10.1, 10.10.10.5).
+
+**Verification:** `/site/login` returns 200 (3867 B) directly on both app nodes (`10.10.10.3:81`,
+`10.10.10.4:81`) and end-to-end through both proxies (`https://dmcmanagement.duckdns.org/site/login`
+via `--resolve` to .1 and .5). No 500s, no regression. Code-only change (a session-timeout config
+value + an authorization guard) - no schema/data change, so file-level rollback backups were the
+appropriate safeguard rather than a DB dump. Rollback = copy the two files back from
+`.3:/var/tmp/loan-deploy-backup-20261003/` and reload `loan-php-fpm` on both nodes.
+
+Behavioral confirmation of S2 against a live prod manager login was NOT done (would require a
+known-good prod credential; not guessed). S1's 12h cap is config-loaded and additive. Both verified
+non-regressing at the HTTP layer.
+
+## 2026-10-16: per-staff customer ownership - Phase 1 (schema + backfill)
+
+Client brief: each staff member's customers should be separate and categorised, an
+admin clicking a staff name should see that staff member's customers, staff should be
+able to edit customer and repayment details, and no staff member should see another's
+customers.
+
+**Phase 0 (measurement) decided the ownership field, rather than assuming one.** Three
+candidates existed: `customer.created_by`, the customer's market
+(`customer.market_id -> market.assigned_staff_id`), or a new column. Measured against
+the live dev data first:
+
+```
+id | name           | created_by | market | market_staff | loan_staff
+ 1 | Adaeze Chukwu  |     1      |   7    |      3       |     3
+ 2 | Ibrahim Sule   |     1      |   8    |      4       |     4
+ 3 | Funke Adebayo  |     1      |   7    |      3       |     3
+ 4 | Chidi Eze      |     1      |   8    |      4       |     4
+ 5 | Kemi Alabi     |     1      |   7    |      3       |     4   <- loan staff differs
+ 6 | Uche Nnamdi    |     1      |   8    |      4       |   NULL  <- no loan at all
+```
+
+`created_by` is 1 (admin) for **every** customer, because the admin registers them all -
+scoping by it would give admin all six and the staff none. Loan assignment can't define
+it either: customer 6 has no loan. The market assignment is the only field that already
+splits them correctly (3/3). Hence: new column, backfilled from the market, `created_by`
+left alone as the audit field it is.
+
+`m261016_100000_add_assigned_staff_to_customer` adds `customer.assigned_staff_id`
+(nullable, indexed, FK to `user.id` with `SET NULL` on delete, mirroring
+`market.assigned_staff_id`), then backfills from `market.assigned_staff_id`. Result: 6
+of 6 customers assigned, 0 left unassigned. Soft-deleted customers are backfilled too,
+so a restore from trash doesn't come back ownerless. Migration verified reversible
+(`migrate/down` drops cleanly, re-applied).
+
+**Nothing reads the column yet** - this phase deliberately changes no behaviour.
+Enforcement is the following RBAC phase.
+
+### Phase 1 close-out checks
+
+**Code quality.** Matches the sibling `m260916_090100_add_market_id_to_customer` in
+naming, column placement (`after()`), index/FK naming convention and docblock style.
+Lint clean.
+
+**Security.** `assigned_staff_id` is deliberately *not* in `Customer::rules()`, so it is
+not a safe attribute and `load()` cannot set it from POST - there is no mass-assignment
+path to self-reassign a customer before the RBAC phase builds a guarded one. No
+`setAttributes(..., false)` or `->attributes =` bulk writes exist on Customer.
+`ActivityLog` already maps `assigned_staff_id` to the label "Assigned staff" and
+resolves it as a user reference (it was added for `loan.assigned_staff_id`), so audit
+rows for the new column render correctly with no further change. **Raised for the next
+phase:** a NULL owner must never be read as "visible to everyone" - with `SET NULL` on
+delete, removing a staff account would otherwise silently publish their customers to
+every other staff member. The scoping rule must treat NULL as admin-only.
+
+**Performance.** Measured, not assumed, on a throwaway copy table (`zz_perftest_customer`,
+50,000 synthetic rows, dropped afterwards - no real rows touched). For the query the
+enforcement phase will run (`WHERE assigned_staff_id = ? AND deleted_at IS NULL ORDER BY
+created_at DESC LIMIT 20`): with the single-column index this migration adds, 0.46
+ms/query for an owner holding ~1/8 of the table and 0.34 ms for a thin-slice owner
+(60 of 50,000, worst case for sort-then-filter); adding a composite
+`(assigned_staff_id, deleted_at, created_at)` gives 0.25 / 0.22 ms. Roughly 2x on a
+query that is already sub-millisecond, so the composite is **not** added now - revisit
+in the enforcement phase when the final query shape (search + date filters) is known,
+rather than guessing at an index before the query exists.
+
+**Could this have been done better.** Checked against HumHub (see "Borrowed from
+HumHub") - it reaches the same created_by-is-not-ownership conclusion, which is
+reassurance rather than a borrow. Two alternatives considered and rejected: a
+staff<->customer junction table (real many-to-many isn't in the brief - "Sandra's
+customers" is singular ownership, and a junction table would make every visibility
+query a join for no present benefit), and deriving ownership live from the market with
+no column at all (cheapest, but a customer could then never be moved between staff
+without moving their whole market, which is exactly the reassignment the client asked
+for).
+
+## 2026-10-16: per-staff customer ownership - Phase 2 (RBAC), same day
+
+Dedicated RBAC phase, kept separate from the enforcement that follows. Adds the
+customer-scoping permissions, their rule, and the two model methods every later call
+site routes through. **Still changes no visible behaviour** - nothing calls them yet;
+verified by logging in as staff1 on the local instance and confirming
+`/customer/index`, `/customer/view?id=1`, `/customer/view?id=2`, `/loan/index` and
+`/dashboard/index` all still return 200. (`/customer/view?id=2` is staff2's customer -
+that 200 is the gap Phase 3 closes, recorded here as the before-state.)
+
+`m261016_110000_add_customer_scope_rbac` mirrors the loan-side pair from
+`m260910_200000_init_rbac`:
+
+| New item | Assigned to | Carries rule |
+|---|---|---|
+| `viewAssignedCustomers` | staff (inherited upward) | `IsAssignedStaffCustomerRule` |
+| `viewAllCustomers` | manager (inherited by admin) | - |
+
+`manageCustomers` is deliberately untouched: it answers "may this role work with
+customers at all", the new pair answers "which customers". Keeping them apart is the
+same separation the loan module already uses between `manageLoans` and
+`viewAllLoans`/`viewAssignedLoans`, and means neither check can accidentally widen the
+other.
+
+`IsAssignedStaffCustomerRule` encodes two decisions at the RBAC layer rather than at
+call sites:
+
+1. **A NULL owner is visible to nobody through the rule** - only to `viewAllCustomers`
+   holders. Because `customer.assigned_staff_id` is `SET NULL` on user delete, the
+   opposite reading would turn deleting a staff account into a silent disclosure of all
+   their customers to every remaining staff member.
+2. **A staff member holding a loan assigned to them can see that loan's customer**, even
+   when the customer belongs to a colleague. Loan assignment and customer ownership are
+   allowed to disagree; without this, the assigned staff member would see a loan they
+   must collect on but hit 403 on the customer behind it - the same visible-record /
+   inaccessible-detail dead end already fixed twice in this app. The admin resolves the
+   mismatch by reassigning (which the client asked for); the rule only stops it being a
+   dead end meanwhile.
+
+`Customer::isVisibleToCurrentUser()` (per record) and `Customer::scopeVisible()` (per
+list) are the two sides of this, deliberately shaped like
+`Loan::isVisibleToCurrentUser()`.
+
+#### Standing hazard: this rule's authorization silently depends on `Loan` having no default scope
+
+The fallback in point 2 is `Loan::find()->where(['customer_id' => ..., 'assigned_staff_id'
+=> ...])->exists()` (`rbac/IsAssignedStaffCustomerRule.php:62-64`). `where()` **replaces**
+any condition `find()` already carries - this is documented behaviour of
+`yii\db\ActiveRecord::find()`, whose own docs say "Use `andWhere()`/`orWhere()` to apply
+the default condition / Use `where()` to ignore the default condition". Today `Loan::find()`
+carries no default condition, so the query is correct as written.
+
+It stops being correct the moment `Loan` is made soft-deletable the way `Customer` and
+`Market` already are - a `deleted_at` migration plus `use SoftDeletable`. From then on
+`Loan::find()` carries `deleted_at IS NULL`, this `where()` throws it away, and the rule
+grants a staff member access to a colleague's customer **on the strength of a loan that has
+been deleted**. There is no error and no warning: the only visible symptom is an
+authorization answer that is wrong.
+
+Proved by experiment on the A/B rig, 2026-10-25 (both halves of the change applied to the
+candidate instance only, then reverted and parity re-verified). Fixture: customer 5 is owned
+by staff 3, loan 7 is assigned to staff 4, so staff 4's access to customer 5 comes *only*
+from this fallback.
+
+| state of loan 7 | rule as written (`->where`) | same query with `->andWhere` |
+|---|---|---|
+| live | `true` | `true` |
+| soft-deleted | **`true`** | `false` |
+
+The one-word fix, if that day comes, is `andWhere()`. It is deliberately **not** applied now:
+with no scope on `Loan::find()` the two are equivalent, and changing it today would be an
+unverifiable no-op. What matters is that whoever adds soft-delete to `Loan` reads this first.
+Note that the three duplicate-guard queries in `GuarantorController:118`,
+`LoanController:198` and `RepaymentController:151` use `->where()` on `Guarantor`, `Loan` and
+`Repayment` the same way; they are duplicate detection rather than authorization, so the
+stakes are lower, but the same reasoning applies if any of those models gains a default scope.
+
+Full write-up, including the proof script and the detection options: `YII_REVIEW.md` item W1.
+
+### Phase 2 close-out checks
+
+**Code quality.** Lint clean. Mirrors the loan-side naming and structure throughout.
+Three fixes made during the phase: `Customer` was missing the `IncludesTrashedRelations`
+trait that `getAssignedStaff()` needs, was missing `use Yii;` (the house style used by
+`Loan`/`Market`, rather than inline `\Yii::`), and `scopeVisible()`'s `select('1')`
+quoted `1` as a column name - a real "Unknown column '1' in SELECT" failure caught by
+the verification matrix below, now `new Expression('1')`. The rule's logic is expressed
+twice (once as PHP, once as SQL) because row-level and set-level checks genuinely need
+different forms; the matrix test exists specifically to prove the two never drift.
+
+**Security.** Verified by running the real RBAC stack over every user x every customer:
+
+```
+user      c1(own 3) c2(own 4) c3(own 3) c4(own 4) c5(own 3) c6(own 4)
+admin     VISIBLE   VISIBLE   VISIBLE   VISIBLE   VISIBLE   VISIBLE
+manager1  VISIBLE   VISIBLE   VISIBLE   VISIBLE   VISIBLE   VISIBLE
+staff1    VISIBLE   denied    VISIBLE   denied    VISIBLE   denied
+staff2    denied    VISIBLE   denied    VISIBLE   VISIBLE   VISIBLE
+```
+
+staff2 reaching c5 is the intended mismatch case (Kemi Alabi: owned by staff1, loan
+assigned to staff2). `scopeVisible()` returned exactly the same id sets as the
+per-record check for all four users. The NULL-owner case was tested inside a
+transaction that was rolled back (no real row modified): with c6's owner nulled,
+staff2's list dropped from `[2,4,5,6]` to `[2,4,5]` while admin/manager kept all six -
+NULL is admin/manager-only, as designed. Also confirmed in `yii\web\User::can()` that
+results are **not** cached when `$params` is non-empty (`framework/web/User.php:753`),
+so a VISIBLE verdict for one customer cannot leak to another within a request; only the
+record-independent `viewAllCustomers` check is cached, which is safe.
+
+**Performance.** `authManager` caches the RBAC hierarchy in KeyDB
+(`'cache' => 'cache'`), so the new items only work if that cache was invalidated - a
+fresh process resolves all three (`viewAllCustomers`, `viewAssignedCustomers`,
+`isAssignedStaffCustomer`), confirming `DbManager::add()` invalidated it. Measured
+costs: the owner comparison short-circuits with **no database hit at all**
+(0.002 ms/check), and only the mismatch fallback runs a query (0.152 ms/check). The
+list query's plan is fully indexed (`customer` via `idx-customer-created_at`, the
+subquery via `index_subquery` on `idx-loan-customer_id-created_at`). **Carried into
+Phase 3:** `isVisibleToCurrentUser()` must never be called in a loop over a list - that
+would be an N+1 of the fallback query. Lists use `scopeVisible()`; the per-record method
+is for single-record access only.
+
+**Could this have been done better.** Checked against HumHub's
+`ActiveQueryContent::readable()` (see "Borrowed from HumHub"), which independently
+confirms all three structural choices: scope lists in SQL rather than filtering in PHP,
+short-circuit entirely for a view-all role, and express ownership as an OR of several
+paths. One deliberate divergence: HumHub uses `leftJoin`s, which would duplicate a
+customer row per matching loan here and force a `DISTINCT`; an `EXISTS` subquery
+returns each customer once and lets the optimizer stop at the first matching loan.
+
+## 2026-10-16: per-staff customer ownership - Phase 3a (enforcement: customer pages), same day
+
+First phase that changes what users can see. Applies the Phase 2 primitives to
+`CustomerController`, which holds every customer read path; the remaining leak sites
+(import duplicate-check, loan-create-for-customer, guarantor edit, market counts) are
+Phase 3b.
+
+| Action | Guard |
+|---|---|
+| `index` | `Customer::scopeVisible()`, applied before search/date filters so they can only narrow |
+| `view` / `update` / `photo` / `delete` | all route through `findModel()`, which now checks `isVisibleToCurrentUser()` |
+| `trash` | `scopeVisible(Customer::findTrashed())` |
+| `restore` | explicit check (it reads trashed rows, not live ones, so `findModel()` doesn't cover it) |
+| `create` | sets `assigned_staff_id` via `defaultOwnerFor()` |
+
+The guard is centralized in `findModel()` rather than repeated per action, so an action
+added later cannot silently skip it. `ForbiddenHttpException` matches
+`LoanController::actionView()`'s existing treatment.
+
+**Ownership at registration** (`defaultOwnerFor()`): a staff member always keeps what
+they just registered - anything else lets them create a customer and immediately lose
+sight of it, even when registering into a colleague's market. An admin or manager isn't
+a collector, so their registrations follow the chosen market's assigned staff, the same
+rule the Phase 1 backfill used. Neither applying means unassigned, which is
+admin/manager-only, never visible-to-everyone. **Judgment call for the client:** a staff
+member registering a customer into another staff member's market currently keeps that
+customer; the alternative (ownership follows the market) is a one-line change in
+`defaultOwnerFor()`.
+
+### Phase 3a close-out checks
+
+**Code quality.** Lint clean. One thing removed during the phase: an eager-load of
+`assignedStaff` added to the index query before any view used it - one wasted query per
+page load, so it comes back in Phase 4 together with the column that needs it. Verified
+`customer/view.php` already filters its loan list through
+`Loan::isVisibleToCurrentUser()` (line 12), so a staff member reaching a customer
+through the loan-mismatch path still sees only their own loans on that customer's page -
+that pattern was already correct and needed no change.
+
+**Security.** Verified over real HTTP against the local instance, one logged-in session
+per role, not through framework shortcuts:
+
+```
+user      c1    c2    c3    c4    c5    c6    list
+admin     200   200   200   200   200   200   6 links
+manager1  200   200   200   200   200   200   6 links
+staff1    200   403   200   403   200   403   3 links
+staff2    403   200   403   200   200   200   4 links
+```
+
+Also confirmed, all as staff1 against staff2's customer c2: `update` 403, `photo` 403,
+`POST delete` 403 (and `deleted_at` still NULL afterwards - the refusal mutated
+nothing). Search cannot widen the list (`?q=Ibrahim` and `?q=Chidi` return 0 results for
+staff1, `?q=Adaeze` returns 1). Trash scoping tested by soft-deleting c2 directly in the
+database: staff1's trash showed 0 restore links, staff2's and admin's showed 1, and
+`POST restore?id=2` as staff1 returned 403; c2 was then restored by exact id (`WHERE id
+= 2`), leaving 6 live customers and 0 trashed, with no audit rows written. Mass
+assignment retested at the HTTP layer: a `customer/update` POST carrying
+`Customer[assigned_staff_id]=4` and `Customer[created_by]=4` returned 302 and left both
+fields unchanged (owner still 3, created_by still 1). Registration ownership was tested
+end-to-end by actually registering two customers (staff1 into market 8 -> owner 3;
+admin into market 8 -> owner 4), then removing both rows and their two audit rows by
+exact id - verified 6 live customers and 0 `ZZ %` rows remaining afterwards.
+
+**Performance.** Measured as query count per real page load (DB-side `Questions`
+delta): `/customer/index` is 15 queries for both admin and staff1, and
+`/customer/view?id=1` is 24 for both - scoping adds nothing, because the restriction
+rides inside the existing query rather than adding one. The single exception is the
+loan-mismatch fallback: staff2 viewing their own c2 costs 24 queries, and viewing c5
+(reached through an assigned loan) costs 25 - exactly the one `EXISTS` query the Phase 2
+measurement predicted, and only on that path.
+
+**Could this have been done better.** HumHub guards single records the same way - a
+model method called from the controller (`$content->canView()` in
+`ContentController.php:189`, `:391`, `PermaController.php:50`) - which confirms the
+shape. Divergence: HumHub repeats that call at each action, so each new action must
+remember it; centralizing in `findModel()` means every current and future single-record
+action in this controller inherits the check. Worth noting this only works because every
+such action here already went through `findModel()`; the equivalent HumHub controllers
+fetch content by several different paths.
+
+## 2026-10-16: per-staff customer ownership - Phase 3b (enforcement: remaining paths), same day
+
+Closes the customer-reachable paths outside `CustomerController`. Three of the sites
+suspected at planning time turned out **not** to be staff-reachable and were deliberately
+left alone rather than changed for the sake of it: `MarketController` (gated on
+`manageMarkets`, manager+), `ReportController` (`viewReports`, manager+), and
+`GuarantorController::actionCreate()` (already carries a loan-visibility check).
+
+| Path | Change |
+|---|---|
+| `ImportController` duplicate scan | owner carried alongside each phone; the existing customer's **name** is shown only to someone entitled to see that customer |
+| `ImportController` row creation | sets `assigned_staff_id` via the shared model rule |
+| `LoanController::actionCreate` | customer visibility check before a loan can be attached |
+| `GuarantorController::actionCreateForCustomer` | customer visibility check |
+| `GuarantorController::actionUpdate` (customer branch) | `isVisibleToCurrentUser()` added alongside `manageCustomers` |
+| `DashboardController::actionStaff` | a staff member may open their own page only; manager/admin keep everyone's |
+| `dashboard/index.php` | staff see only their own performance row |
+
+**The import duplicate scan still reads every customer**, deliberately: a phone number
+that already exists belongs to somebody regardless of whose customer they are, and
+scoping the scan would let a staff member import duplicates of a colleague's customers -
+a data-integrity problem, not a privacy win. What is scoped is the *message*: "phone X
+already belongs to Adaeze Chukwu" for a customer the importer may see, and "phone X
+already belongs to another customer" otherwise.
+
+**`defaultOwnerFor()` moved from `CustomerController` to
+`Customer::defaultOwnerForCurrentUser()`** - two entry points now create customers (the
+form and CSV import) and must not drift apart on something this consequential.
+
+**The dashboard drill-down lock replaces an earlier deliberate decision** (that any staff
+member could open any colleague's page, documented in `DashboardController`'s own
+docblock). That page lists a staff member's loans *with customer names*, so leaving it
+open would hand back exactly what the customer scoping takes away. A staff member keeps
+their own page - seeing your own figures is not what is being restricted.
+
+### Phase 3b close-out checks
+
+**Code quality.** Lint clean across all five changed files. The ownership rule is now in
+one place instead of two. One genuine bug caught while writing the import change: the
+duplicate check used `isset($existingPhones[$phone])`, and storing a masked owner as
+`null` makes `isset()` false - every duplicate of a customer the importer could not see
+would have been created again, silently. Changed to `array_key_exists()`, and verified
+by importing a file whose rows duplicate both a visible and a non-visible customer: both
+were skipped, and the phone counts stayed at 1 each.
+
+**Security.** Verified over real HTTP, per role:
+
+```
+staff1 /loan/create?customerId=2                    403   (staff2's customer)
+staff1 /guarantor/create-for-customer?customerId=2  403   (staff2's customer)
+staff1 /guarantor/create-for-customer?customerId=3  200   (own customer)
+staff1 /dashboard/staff?id=3  (self)                200
+staff1 /dashboard/staff?id=4  (colleague)           403
+admin  /dashboard/staff?id=4                        200
+dashboard staff-performance rows: admin 2, manager1 2, staff1 1, staff2 1
+```
+
+Note `staff1 /loan/create?customerId=1` also returns 403 even though staff1 owns
+customer 1 - that is the pre-existing `manageLoans` gate (manager+ only), not the new
+check; admin gets 200 on the same URL. The new customer check there is a no-op today for
+the same reason `GuarantorController::actionCreate()`'s loan check is, and is documented
+as such in both places. Import masking verified end-to-end: importing as staff1 a file
+containing staff2's customer's phone reported "already belongs to another customer"
+(no name), while a duplicate of staff1's own customer reported the name. Imported rows
+got the right owner (staff1 -> owner 3; admin -> owner NULL, i.e. admin/manager-only
+until assigned). The full Phase 3a role matrix was re-run afterwards and is unchanged.
+
+**Performance.** The import scan selects one extra column (`assigned_staff_id`) on a
+query that already runs once per import, batched at 500 - no additional queries. The
+dashboard row filter is PHP over an array that is already in the shared cache entry, so
+it adds no query either; measured `/dashboard/index` at 6 queries for staff1 and 13 for
+admin (admin's higher count is its larger nav, not the filter). Deliberately filtered in
+the view rather than in `DashboardCache::getTotals()`, because that is one shared cache
+entry for every user - scoping it there would make the cached value depend on whoever
+warmed it.
+
+**Could this have been done better.** HumHub faces the same disclosure question when an
+invite targets an already-registered email: `Invite::isRegisteredUser()` detects the
+conflict, but `sendAlreadyRegisteredUserMail()` tells the *existing account*, never
+handing the inviter any detail about it
+(`modules/user/models/Invite.php:261-285`). Same principle the import report now
+follows - confirm the conflict to the requester, disclose the identity only to someone
+entitled to it. Checked and not borrowed: the mechanism (notifying the other party)
+doesn't transfer, since a CSV import has nobody to notify.
+
+### Testing incident, recorded deliberately
+
+The Phase 3a mass-assignment test posted a `customer/update` for customer 1 with
+*invented* values for the fields that were legitimately editable (phone, address,
+gender). The mass-assignment attempt itself was correctly refused - `assigned_staff_id`
+and `created_by` were unchanged, which is what the test was checking - but the ordinary
+fields were saved, altering real seed data. Caught while reviewing the audit rows during
+cleanup, and restored exactly from that row's own `old_value` JSON (phone
+`08031234501` -> `08012345001`, address back to "12 Bode Thomas St, Surulere, Lagos",
+gender back to NULL, including the original `updated_at`), verified field by field. The
+lesson for later phases: a write test against real data must post the record's *current*
+values for every field it does not intend to change, not placeholder ones.
+
+## 2026-10-16: per-staff customer ownership - Phase 4 (the by-staff view + reassignment), same day
+
+The client-facing half: "click Sandra, see Sandra's customers", plus the control that
+lets the admin fix a wrong assignment instead of living with it.
+
+| Change | Where |
+|---|---|
+| `?staff=<id>` filter on the customer list, with a Staff dropdown | `CustomerController::actionIndex`, `views/customer/index.php` |
+| Assigned-staff shown on each customer card | `views/customer/index.php` |
+| Page title becomes "<name>'s customers" when filtered | `views/customer/index.php` |
+| "<name>'s customers" link on the staff drill-down | `views/dashboard/staff.php` |
+| Assigned-staff dropdown on the customer form | `views/customer/_form.php` |
+| Reassignment handling | `CustomerController::actionUpdate` |
+
+**The filter is only honoured for `viewAllCustomers` holders.** For anyone else the list
+is already exactly their own customers, so the parameter could only serve as a way to
+probe whether a given staff id has any - staff1 passing `?staff=4` still gets staff1's
+own three. It is applied on top of `scopeVisible()`, never instead of it.
+
+**Reassignment never goes through `load()`.** `assigned_staff_id` is still deliberately
+not a safe attribute; `actionUpdate()` reads the posted value by hand, ignores it
+entirely unless the user holds `viewAllCustomers`, and then accepts it only if it names
+an **active staff member** (blank meaning unassigned). Anything else - a deleted user, an
+admin's id, junk - is ignored and the existing owner kept, so a bad value can never
+orphan a customer. The existing `customer_update` audit row captures the change for free,
+since `assigned_staff_id` is part of `getAttributes()`.
+
+The owner dropdown uses `$ownerOptions`, **not** `$staffOptions`: `create.php` already
+passes `staffOptions` to this same shared form for the *loan's* assignee, and reusing
+the name would have silently cross-wired the two dropdowns.
+
+`views/dashboard/staff.php` also had a comment asserting "Customer has no
+staff-assignment concept at all (unlike Loan)" - true when written, false since Phase 1.
+Corrected in place, keeping the part that is still true (the Add-customer link must not
+preset an owner).
+
+### Phase 4 close-out checks
+
+**Code quality.** Lint clean across all five files. The `$ownerOptions`/`$staffOptions`
+collision was caught by reading `create.php` before naming the variable, not by a test.
+Stale comment corrected rather than left to mislead.
+
+**Security.** Verified over HTTP:
+
+```
+admin  /customer/index?staff=3   -> 3 customers, title "John Okoro's customers"
+admin  /customer/index?staff=4   -> 3 customers, title "Amaka Nwachukwu's customers"
+admin  /customer/index           -> 6 customers
+staff1 /customer/index?staff=3   -> 3 (own)      staff1 ?staff=4 -> 3 (own, filter ignored)
+drill-down link present for admin, absent for staff1
+owner dropdown rendered for admin, absent for staff2
+```
+
+Reassignment tested end-to-end: as admin, moving c5 (Kemi Alabi) from staff1 to staff2
+changed **only** `assigned_staff_id` and `updated_at` in the audit row (log 577, user 1),
+and visibility followed immediately - staff1's list dropped from 3 to 2 and c5 became
+403 for them, while staff2 kept it. staff2 then attempting to hand c5 back to staff1 was
+silently ignored (owner stayed 4), which is correct: they never see the control, so this
+is a hand-crafted POST, not a user mistake worth an error message. c5 was afterwards
+restored field-for-field from the audit row's `old_value` (owner 3, original
+`updated_at`), and both test audit rows removed by exact id. Final state: 6 live
+customers, owners 3/4/3/4/3/4 as before. Applied the lesson from the Phase 3b incident -
+every write test posted the record's current values for the fields it was not trying to
+change.
+
+**Performance.** First measurement showed `/customer/index` rising from 15 queries to 18
+for admin **and 16 for staff1** - the staff member was paying for an `assignedStaff`
+eager load whose name their page never renders. Made conditional on the owner column
+actually being shown, which puts staff1 back to exactly 15. Admin's 18 is +1 for the
+eager load (used) and +2 for `User::activeStaffOptions()` populating the filter dropdown
+(`getUserIdsByRole` plus one user query); both do real work, and the filtered view costs
+the same 18 as the unfiltered one.
+
+**Could this have been done better.** HumHub has the closest precedent in Space
+ownership - and it does the opposite: `Space::getOwnerUser()` is
+`hasOne(User::class, ['id' => 'created_by'])` (`modules/space/models/Space.php:568`),
+so a Space's owner *is* whoever created it, with no transfer path short of rewriting an
+audit field. That is precisely the design Phase 0 measured and rejected here (every
+customer carries `created_by = admin`), so this is a checked-and-deliberately-not-borrowed
+case with a concrete reason rather than a preference. Logged in "Borrowed from HumHub".
+
+## 2026-10-16: per-staff customer ownership - Phase 5 (staff edit rights), same day
+
+The client's second requirement: "the staff should be able to edit customer information,
+including repayment details."
+
+**Customer editing already worked** and needed no change - `manageCustomers` is a
+staff-level permission, and Phase 3a's `findModel()` guard scopes it to their own
+customers (staff1 editing c1 succeeds, c2 returns 403). Verified rather than assumed.
+
+**Repayment editing is the actual change, and it reverses an earlier deliberate
+decision.** `repayment/update` was gated on `manageLoans` (manager/admin) while
+`repayment/create` was `manageRepayments` (staff), on the reasoning that correcting a
+booked payment is a credit-control decision. The client's instruction overrides that -
+staff collect the money, so staff fix their own mistakes. Both actions are now
+`manageRepayments`. What separates a staff member from a colleague's repayments is the
+row-level check already in `actionUpdate()`: `$loan->isVisibleToCurrentUser()`.
+
+`loan/view.php` previously hid the repayment Edit column behind `$canManageLoan`, the
+same flag that hides guarantor management - which must stay manager-level. Split: the
+repayment column now uses `$canManageRepayments`
+(`can('manageRepayments') && $loan->isVisibleToCurrentUser()`), which also replaces the
+old `$canRecordRepayment` flag, since the client wants the same people doing both.
+Recording still additionally requires an open loan; editing deliberately does not -
+correcting a payment that closed a loan too early is exactly what editing exists for,
+and `Repayment`'s own docblock already said so.
+
+**Every edit is logged**, with no new code: `AuditLogger::audit('repayment_update', ...)`
+already wrote old and new values on this path, and a staff edit produces the same row as
+a manager's.
+
+### Phase 5 close-out checks
+
+**Code quality.** Lint clean; no stale `$canRecordRepayment` references remain. The
+repayments table's header cell and body cell were moved onto the new flag **together** -
+switching only one would have misaligned the table's columns for staff.
+
+**Security.** Verified over HTTP after re-logging in so sessions picked up the
+permission change:
+
+```
+GET /repayment/update?id=N      r1    r2    r3    r4      (r1 = staff1's loan; r2-r4 staff2's)
+staff1                          200   403   403   403
+staff2                          403   200   200   200
+admin                           200   200   200   200
+```
+
+Edit links render for staff1 on their own loan (1), for staff2 on their own *completed*
+loan (2 links - the intended correction case), and not at all for staff1 on staff2's
+loan (which is itself 403). A direct `POST /repayment/update?id=2` as staff1 with
+`amount=99999` returned 403 and left repayment 2 at 2900.00 and loan 3 `completed` -
+refused without mutating. A real staff edit was then performed end to end: staff1
+changed repayment 1 from 2000.00 to 2500, which produced audit row 590
+(`repayment_update`, user 3, `amount '2000.00' -> '2500'`), and was restored through the
+same UI afterwards (row 592). Repayment 1 is back to 2000.00 / 2026-09-17 /
+recorded_by 3, and all 4 repayments are intact.
+
+**Performance.** No new queries: the change is a permission string and two view flags.
+`/loan/view?id=1` costs 26 queries for staff1 and `/repayment/update?id=1` costs 14,
+both unchanged by this phase. The write path was already correct and was not touched -
+it takes `SELECT ... FOR UPDATE` on the loan row, re-checks the start date under the
+lock, writes the audit row inside the transaction, and only invalidates the balance
+cache and bumps the dashboard version after a real commit.
+
+**Could this have been done better.** HumHub's `Content::canEdit()`
+(`modules/content/models/Content.php:910-950`) answers the same question with two
+branches: the author may edit their own content (`created_by === $user->id`), and anyone
+holding a *manage* permission on the container may edit anything in it. This app's new
+rule is the second branch - the loan is the container, and the staff member assigned to
+it may correct any repayment on it, including one recorded by a colleague or a manager.
+**Judgment call surfaced for the client:** the narrower, author-style alternative
+(a staff member may only edit repayments they recorded themselves) is a one-line change
+(`$repayment->recorded_by_staff_id === Yii::$app->user->id`) and matches HumHub's first
+branch. The broader rule was chosen because a staff member who takes over a colleague's
+loan would otherwise be unable to fix its history - but it is the client's call.
+
+### Local-only finding, not a production issue
+
+The staff edit triggered `Loan::syncStatusFromBalance()`, which moved loan 1 from
+`active` to `overdue` - correctly: it was due 2026-10-14 with 2000 of 5750 paid. The
+stale `active` status (and loan 7, still stale) exists only because the nightly
+`loan/mark-overdue` command (`protected/commands/LoanController.php`, scheduled by
+`protected/deploy/cron/`, 03:15) does not run on this dev box. Production marks these
+overnight, so this is a local data artifact, not a bug. Loan 1's corrected status was
+left in place rather than forced back to a value that was never right.
+
+## 2026-10-16: per-staff customer ownership - Phase 6 (adversarial verification), same day
+
+Final phase. The security check was run as an actual attack pass rather than a role x
+resource status-code grid (the earlier phases' checks were too shallow - a confirmation
+that the happy path and the obvious denial behave, not an attempt to get around the
+control). Every attack below was run as staff1 against staff2's data on the local
+instance, with real state captured before and restored after.
+
+**Attacks attempted and refused:**
+
+- *HTTP parameter pollution* on the id: `?id=1&id=2`, `?id=2&id=1`, `?id[]=2`,
+  `?id[0]=2` - all resolve to a single scalar and the guard runs on the resolved model,
+  so `id=2` is 403 regardless of how it is smuggled. `?id=2&id=1` renders customer 1
+  (last value wins, Yii scalar coercion), not 2.
+- *Type juggling* on the id: `2abc`, `02`, `2.0`, `+2`, `2%00`, `1e0`, `0x2`, `-2`,
+  20-digit overflow, `2%2f`. The guard checks the loaded model's visibility, so MySQL's
+  own cast of `2e0`/`02` to the integer 2 still lands on a customer staff1 can't see and
+  is refused (403). `1e0` -> customer 1 is staff1's own, correctly 200.
+- *SQLi* through `id`, `q`, `sort`, `staff`, and the `like`-based name search - tested
+  directly against the app's query builder with mod_security removed from the path
+  (a WAF 403 proves nothing about the code). Every payload lands as a bound, escaped
+  string (`full\_name LIKE '%...%'` with the payload as data) and returns 0 rows; the
+  `staff` filter is `(int)`-cast so `"4 OR 1=1"` -> `4`, `"0x04"` -> `0`.
+- *Mass assignment* of every sensitive column in one `customer/update` POST on staff1's
+  own c1: `Customer[id]=2`, `[assigned_staff_id]=3`, `[created_by]=3`, `[deleted_at]=0`,
+  `[created_at]=1`. Update succeeded (302) and **every** smuggled field was ignored - id
+  still 1, created_by still 1, created_at unchanged, and critically `[id]=2` did not
+  rewrite customer 2 (c2 untouched). None of these are in `Customer::rules()`, so
+  `load()` never binds them; `assigned_staff_id` is applied by hand only for
+  viewAllCustomers holders.
+- *Self-escalation*: staff cannot reach `loan/update` (manageLoans is manager+), so they
+  cannot assign themselves a loan to gain its customer. Confirmed 403 on
+  `loan/view?id=6`, `loan/update?id=6`, and POST `repayment/create?loanId=6`.
+- *Alternate-route IDOR* to staff2's customer 2: `customer/photo`, `customer/update`,
+  `guarantor/create-for-customer`, `loan/create`, and `guarantor/update?id=2` (the
+  guarantor row on c2) - all 403, and the guarantor POST left the row's name unchanged.
+- *CSRF token reuse across accounts*: staff2's `_csrf` token replayed inside staff1's
+  session -> 400 (tokens are session-bound).
+- *Audit evasion*: a real repayment edit sent with `X-Forwarded-For: 1.2.3.4` and
+  `X-Real-IP: 9.9.9.9` logged `ip_address = 127.0.0.1` (REMOTE_ADDR, headers ignored).
+  **Provenance caveat:** this was tested direct-to-Apache. On production the app sits
+  behind the two nginx+ModSecurity proxies, so the trustworthiness of the logged client
+  IP there depends on the proxy's real-IP / trusted-proxy configuration, which is a
+  separate question from this local result - not validated here.
+- *Soft-delete / trash bypass*: staff1's trash shows 0 of staff2's deleted customers,
+  and `POST restore?id=2` on a trashed c2 -> 403 with `deleted_at` unchanged.
+
+**A verification process note worth keeping:** the trash-restore test first appeared to
+return 302 (a possible restore), but that run was void - a cleanup `UPDATE deleted_at =
+NULL` had interleaved with the request and masked the real outcome. Re-run in isolation
+with the result read *before* any cleanup, it was 403 with the row still deleted. The
+302 was a measurement artifact, not a vulnerability; recording it because trusting the
+first (dirty) run would have been a false alarm, and the discipline that caught it -
+isolate, read state before cleanup - is the point.
+
+**One genuine finding (low severity): an enumeration oracle.**
+`customer/view?id=2` (exists, not owned by staff1) returns **403**, while
+`customer/view?id=999` (nonexistent) returns **404**. A staff member can therefore tell
+whether a given customer id exists in the system, though not see any of its data. This
+is app-wide behaviour, not new to this feature: `findModel()` throws
+`ForbiddenHttpException` for a visible-but-forbidden row and `NotFoundHttpException` for
+a missing one, matching `LoanController`'s existing pattern (deliberately mirrored in
+Phase 3a). Closing it means returning 404 for both not-found and not-visible across
+customer, loan and guarantor (to keep the pattern consistent). **Client decision 2026-10-16: leave it as 403.** Severity is low (sequential ids in a
+small, known customer base; no data disclosed), and closing it would reverse a
+documented app-wide choice and touch three controllers for little real gain. The 403
+also carries honest UX ("this record exists but is not yours") rather than pretending a
+colleague's customer does not exist. Recorded as decided, not open.
+
+**Android app:** `loan-staff-android` is a pure WebView shell (MainActivity.kt loads the
+base URL with an allowed-host guard; no Retrofit/OkHttp/JSON or client-side auth). All
+scoping is server-side, so it inherits the entire feature with no code change and has no
+client-side control to bypass.
+
+### Phase 6 close-out
+
+Code quality / performance: no code changed this phase (verification only), except the
+findings above. Security: covered above - this phase *is* the security pass. Could-be-
+better: the adversarial method here is the standard every future phase's security check
+on this project should meet; the shallow role-grid checks of Phases 1-5 were re-run under
+it and held, but the method is now the baseline, not the exception.
+
+## 2026-10-16: per-staff customer ownership - DEPLOYED to production (both app nodes)
+
+Deployed the full feature (Phases 1-6) at the client's explicit request ("deploy to
+server and make sure its working"). Client was present and authorizing.
+
+**Access.** Password-only SSH, no keys (deliberate; the classifier blocks key
+persistence). Authenticated once via a persistent SSH ControlMaster socket per node
+(`sshpass -f` from a umask-077 temp file, deleted immediately after the master was up),
+then every step reused the sockets with no password in any process argument. Both
+masters closed with `ssh -O exit` at the end; no authenticated socket or password file
+left behind.
+
+**Delta containment.** The working tree carries pre-existing uncommitted changes from
+prior sessions, so git is not the source of truth for what is on prod. A
+`rsync -ni --checksum` dry run against .3 showed the true content delta was *exactly*
+this feature: 13 modified files (7 controllers, Customer.php, 5 views) + 3 new files
+(2 migrations + IsAssignedStaffCustomerRule). `index.php` and `config/web.php` showed a
+timestamp-only (`.f..t`) delta - content identical - and were deliberately skipped.
+Copied via an explicit 16-file `--files-from` list (not a tree sync), root:root 644, no
+`--delete`. All 16 verified md5-identical on .3, then md5-identical on .4 after lsyncd
+mirrored them (~seconds).
+
+**Also caught pre-deploy:** four test artifacts (`c2.jar`, `_w2.png`, `ffhome/`,
+`ffp2/`) had leaked into the repo root during the session because the Bash tool's cwd
+resets between calls and a few relative-path writes landed outside the scratchpad.
+Removed before the deploy so they could never be swept up; the rsync exclude list also
+guards `*.jar`/`*.png`/the firefox profile dirs as a second layer.
+
+**Migrations - the one real snag.** First `migrate/up` failed cleanly:
+`SQLSTATE 1142 ALTER command denied to 'loantracker'@'127.0.0.1'`. The app DB user had
+been hardened to data-only (SELECT/INSERT/UPDATE/DELETE, no DDL) sometime after the
+2026-09-26 migrations ran - a good least-privilege change. The failure was on the first
+statement (ADD COLUMN); verified the customer table was untouched and migrate/new still
+listed 2 pending, so nothing was half-applied. Fix: temporarily
+`GRANT ALTER, INDEX, CREATE, REFERENCES, DROP ON loantracker.*` to the app user (both
+@127.0.0.1 and @localhost), ran `migrate/up` as `loanapp` (keeping correct runtime file
+ownership), then **revoked** to restore the exact hardened state - verified back to
+SELECT/INSERT/UPDATE/DELETE only on *both* nodes (Galera replicated grant and revoke).
+Future prod migrations on this app need the same grant/revoke dance; the app account is
+intentionally not DDL-capable at rest.
+
+**Result.** 2 migrations applied on .3; Galera replicated the column, index, FK, the
+backfill, and the 2 RBAC permissions + rule to .4 (all verified present on both nodes).
+Backfill: 67 customers assigned (includes 3 soft-deleted), **0 live customers left
+unassigned** - every real prod customer has a market with staff, so none need manual
+assignment. Reloaded `loan-php-fpm` on both nodes (USR2, loan pool only - the shared
+HumHub `php8.4-fpm` pool was confirmed untouched and still active).
+
+**Verification.** `/site/login` 200 (3867 B) through both reverse proxies (.1 and .5);
+`/customer/index` 302 -> /site/login through both proxies (auth stack healthy, no 500).
+Direct-to-node :81 returns 302 (off-canonical-host redirect, not an error). The deployed
+scoping code was run read-only against real data as each real staff user: **admin /
+DMC_SPARKLE / Chuka see 64/64; Sandra (staff) sees 3/64; Yemisi (staff) sees 61/64** -
+the exact per-staff separation the brief asked for, proven against the live customer
+base, zero errors from the full model+RBAC bootstrap. Loan error log clean after reload.
+
+**Rollback (if ever needed):** temporarily re-grant DDL, `migrate/down 2` as loanapp,
+revoke; the 16 files have no prod backup this round (they are all either new files or
+forward-only view/controller changes, and the schema rollback is the migration's own
+safeMigrationDown) - a file-level backup was taken for the code-only S1/S2 deploy but a
+DB dump (taken by the client before this deploy) is the right safeguard for a schema
+change.
+
+## 2026-10-19 — Dashboard poller broke session expiry, post-login redirect, and flooded the edge logs (fixed)
+
+Reported by the client as two symptoms — "my session didn't expire" and "when I
+logged in I was greeted with a poll request" — plus a flooded
+`lt.error.log` on the proxy. All three were one root cause: the dashboard's
+once-a-second `fetch()` poll of `dashboard/poll`.
+
+**1. The idle timeout could never fire.** `yii\web\User::renewAuthStatus()`
+re-arms `authTimeout` on *every* authenticated request, so a poll each second
+renewed it perpetually and the 30-minute idle timeout was unreachable for any
+open dashboard — the normal state for staff all day. Only the 12h
+`absoluteAuthTimeout` bounded such a session.
+Fixed with a new `app\components\WebUser` (wired via `'class'` on the `user`
+component): it captures the deadline before `parent::renewAuthStatus()` and
+writes it back for routes in `$nonRenewingRoutes` (`dashboard/poll`). The
+parent still runs in full, so the *expiry check* is untouched — only the
+extension is suppressed. Uses `getIdentity(false)`, never `getIsGuest()`, which
+would re-enter `renewAuthStatus()` and recurse.
+
+**2. Login landed the user on raw JSON.** `fetch()` sends no
+`X-Requested-With`, so `Request::getIsAjax()` was false and
+`User::loginRequired()` stored `/dashboard/poll?last=N` as the post-login return
+URL; `actionLogin()`'s `goBack()` then honoured it.
+Fixed in `DashboardController::behaviors()` with a narrow `allow => false` rule
+for guests on `poll` carrying its own `denyCallback` that answers with a JSON
+**401**. `AccessControl` prefers a matching rule's `denyCallback` over
+`denyAccess()`, so `loginRequired()` is never reached and the return URL is
+never touched. Guests only — an authenticated user lacking `viewDashboard`
+still falls through to the next rule and gets the normal 403 (verified).
+
+**3. The poller retried forever and flooded the login rate limiter.** `fetch`
+follows redirects, so a logged-out poll fetched the HTML login page,
+`response.json()` threw, `.catch()` swallowed it as a "network hiccup", and
+`.finally()` rescheduled 1s later — endlessly, each iteration tripping the
+proxy's `zone=login` (`rate=5r/m`) for a 503 plus an error-log line.
+Fixed in `views/dashboard/index.php`: send `X-Requested-With`, treat 401 as
+terminal (stop the loop, one `window.location.assign(loginUrl)`), never parse a
+non-OK body as JSON, and back off 1s → 30s on failure, resetting on success.
+
+**Verified locally** (Apache dev site): logged-out poll returns 401 JSON with no
+`Location`; login lands on `/`; authenticated poll still 200; roleless user
+still 403. With `authTimeout` temporarily at 10s, polling alone expired the
+session on schedule (401 at t=12s, dashboard 302) while real requests every 3s
+kept it alive — temp change reverted and diffed back to identical. The shipped
+JS was executed verbatim in node against the live app with the session killed
+mid-flight: `polls=4 navigations=1`, then the loop stopped.
+
+**Verified on prod** (both nodes, direct on `:81` to spend none of the login
+rate-limit budget): 401 JSON both nodes, login → `/` both nodes, authed poll
+200 both nodes. Idle-deadline suppression proven from KeyDB db1 without waiting
+30 minutes — `__expire` unchanged across two polls, +10s after a real
+`/dashboard` request. Public end-to-end through the proxy also returns the 401
+JSON. Backups: `/var/tmp/loan-pollfix-20261019/` on both nodes.
+
+**Not changed, flagged:** 1 req/s per open dashboard is still aggressive for
+four numbers; HumHub's own live poller backs off when idle (see
+`POLLING_COMPARISON.md`). The backoff added here only applies to failures.
+
+### HumHub cross-reference for the poller/auth fix (2026-10-19)
+
+Standing instruction from the client: cross-reference HumHub for *any* PHP work
+and state which is better and what can be merged. Compared against
+`humhub-1.19.0-beta.3` (prod runs 1.19).
+
+**What HumHub does**
+- `humhub\modules\user\components\User extends yii\web\User` overrides
+  **`loginRequired()`** and curates the return URL per request type: for PJAX
+  GETs it rebuilds a clean return URL (stripping `_pjax` and the `_`
+  cache-buster) and then forces `$checkAjax = true` so the parent won't set it
+  again. It also carries a Microsoft-Office-probe workaround.
+- `authTimeout` is **1400s**, and admin-configurable at runtime via
+  `AuthenticationSettingsForm::defaultUserIdleTimeoutSec`
+  (`ComponentLoader::setUserConfig`).
+- Its live poller (`humhub.live.poll.js`) runs a growth-based idle model —
+  `minInterval 10s` → `maxInterval 45s` via `idleFactor 0.1` every
+  `idleInterval 20s` — plus `focus`/`blur` handling, **`BroadcastChannel`
+  cross-tab coordination** so an unfocused tab defers to the focused one, and a
+  `navigator.onLine` check that backs off to `maxInterval` when offline.
+- On a failed poll, `handleUpdateError()` **logs and keeps polling**. There is
+  no terminal handling of auth loss.
+- It does **not** override `renewAuthStatus` anywhere in core (the
+  `yii\web\User::renewAuthStatus` string in `config/common.php` is only a
+  log-target exclusion, verified).
+
+**Verdict per fix**
+
+1. *Idle-timeout suppression (`WebUser::renewAuthStatus`)* — **the loan app is
+   ahead of HumHub.** HumHub sets `authTimeout = 1400` but polls every 10–45s,
+   so its own poller renews the deadline forever: HumHub has the same defect the
+   client reported here, and ships no mitigation. Nothing to borrow. Worth
+   borrowing as an *idea*: making the timeout admin-configurable the way
+   `defaultUserIdleTimeoutSec` is, instead of a hard-coded 1800.
+
+2. *Return-URL poisoning* — **HumHub's placement is better than ours; our
+   response is better than theirs.** HumHub fixes this centrally in
+   `User::loginRequired()`, so every present and future background endpoint is
+   covered; ours is an opt-in `denyCallback` on one AccessControl rule, so a
+   future JSON endpoint must remember to add it. But HumHub still answers a
+   background request with a redirect to HTML, which is exactly what produced
+   the retry flood here, whereas ours answers a machine-readable JSON 401.
+   **Mergeable, and recommended:** move the policy into
+   `app\components\WebUser::loginRequired()` (we already have that subclass —
+   the direct analogue of HumHub's), keeping the JSON-401 semantics, which makes
+   the per-controller rule belt-and-braces instead of load-bearing. Also worth
+   borrowing HumHub's return-URL sanitisation (strip framework/cache-buster
+   params) if more AJAX endpoints appear.
+
+3. *Client poller* — **split.** Our terminal-401 stop is better than HumHub's
+   log-and-continue, and our `document.hidden` check is better than HumHub's
+   focus/blur-only model (a hidden HumHub tab keeps polling at `maxInterval`;
+   ours stops entirely). But HumHub's **interval model and cross-tab
+   coordination are clearly better than ours**: we poll a flat 1s from *every*
+   open dashboard tab, where HumHub polls 10s→45s and lets only the focused tab
+   work. **Mergeable:** adopt a larger base interval plus idle growth toward a
+   max, and `BroadcastChannel` so one tab polls for all; keep our terminal 401
+   and `document.hidden`. This is a UX/behaviour change (how fast the dashboard
+   refreshes), so it needs the client's decision rather than a silent edit.
+
+**Deliberately not borrowed:** HumHub's Microsoft-Office probe branch in
+`loginRequired()` (irrelevant here, and a good example of why this layer should
+stay narrow); its jQuery-based `client.get` (this app is deliberately
+jQuery-free, `fetch` stays); and its log-and-continue error path, which is the
+behaviour we just removed.
+
+### Applying the HumHub merge (2026-10-19, same day)
+
+Client approved both mergeable items from the cross-reference above.
+
+**1. Return-URL policy centralised (HumHub's placement, our semantics).**
+`app\components\WebUser` now also overrides **`loginRequired()`**: a background
+request gets a JSON 401 and the parent is never reached, so the return URL is
+left alone. The per-action `denyCallback` rule in `DashboardController` has been
+**removed** - keeping both would have meant two places to maintain and the
+controller rule would have shadowed the central path, leaving it untested. A
+pointer comment remains where the rule was.
+
+`$nonRenewingRoutes` was renamed **`$backgroundRoutes`** and now drives both
+behaviours from one list, which is the honest framing: these routes are
+background polls, not navigation, so they neither extend the idle deadline nor
+become a post-login destination. `isBackgroundRequest()` also returns true for
+anything sending `X-Requested-With`, since a JSON 401 is the right answer for a
+self-declared XHR regardless of route.
+
+Verified the half that matters: **real navigation still keeps its return URL** -
+logged-out `/customer/index` then login lands back on `/customer/index`, locally
+and on prod. An authenticated-but-roleless user still gets 403, not 401.
+
+**2. Poller cadence + cross-tab coordination (from HumHub's live poller).**
+`views/dashboard/index.php` now runs `minIntervalMs 5000` → `maxIntervalMs
+45000` with `idleGrowth 1.5` applied whenever a poll reports no change, reset to
+the floor on a change or on real interaction (debounced `mousemove`/`keydown`/
+`mousedown`/`touchstart`, as HumHub does). A `BroadcastChannel` named
+`loan.dashboard.poll` shares each result, and a tab that receives one applies
+the totals and stands down to the ceiling instead of duplicating the request.
+Guarded for browsers without `BroadcastChannel`.
+
+5s rather than HumHub's 10s floor: this is a figures screen staff watch while
+taking payments, not a social feed.
+
+Kept deliberately, against HumHub's version: the `document.hidden` check (a
+hidden HumHub tab keeps polling at its ceiling; ours stops outright), the
+terminal 401 stop + single redirect, and refusing to JSON-parse a non-OK body.
+
+**Measured** (shipped JS executed verbatim in node against the live app):
+
+| scenario | before | after |
+|---|---|---|
+| 1 tab, 22s | ~22 polls (flat 1s) | **3** polls at 5.0s / 10.1s / 17.6s (gaps 5.1, 7.5 - idle growth) |
+| 2 tabs, 22s | ~44 polls | **2** polls total (each stood down on the other's broadcast) |
+| session killed mid-run | polled forever | 200, then 401, **1** navigation, loop stopped |
+
+**Correction — the above shipped with a real bug, now fixed (same day).** The
+first version stood down to `maxIntervalMs` when it heard a peer's result. I
+described the leftover multi-tab burst as "harmless at this scale" without
+measuring it. Measured, it was not a burst but **dead air**: with 3 tabs all
+three polled at 5.0s, all three heard each other, and all three went quiet —
+**zero polls for the next 35 seconds**, with the figures silently frozen on
+screen. That is worse than the duplicate polling it was avoiding, and the
+original "2 polls instead of 6" note hid it by counting polls and ignoring gaps.
+
+Four changes, each measured:
+
+1. **Anchor to the last observed result**, not a stand-down. On hearing a peer's
+   result a tab re-arms one interval later and adopts the broadcast interval, so
+   coverage is continuous and the aggregate rate stays ~1 poll per interval
+   regardless of tab count. No leader to elect, nothing to die.
+2. **Jitter (`jitterMs = 750`) on every schedule including the initial one.**
+   The first version's opening `setTimeout` used a flat `intervalMs`, which is
+   exactly where the startup burst slipped through.
+3. **Announce intent before fetching** (`{type: 'poll-start'}`), not just the
+   result. Broadcasting only on completion leaves the entire request latency as
+   a window for another tab to fire — two collisions at 5 tabs, which jitter
+   cannot close because it is latency, not clock alignment. Borrowed from
+   HumHub, which calls `broadCast(EVENT_TYPE_REQUEST)` at the top of `update()`
+   for this reason.
+4. **Broadcast auth loss** (`{type: 'unauthenticated'}`). Each tab used to
+   discover the dead session on its own poll, so three tabs redirected 5s apart
+   and the last showed stale figures ~11s after the session ended.
+
+| scenario | before this correction | after |
+|---|---|---|
+| 1 tab / 35-40s | 4 polls | 4 polls (unchanged) |
+| 3 tabs | 3 simultaneous polls then **35s of nothing** | 4 polls, gaps 5.1/7.6/11.3 — same as 1 tab |
+| 5 tabs | 6 polls, 2 collisions | 4 polls, zero collisions |
+| 8 tabs | — | 4 polls, zero collisions |
+| 3 tabs, session killed | 4 polls, redirects at 10.5/15.9/21.7s | 2 polls, all 3 redirect at 10.5s |
+
+So the aggregate poll rate is now independent of how many dashboards are open.
+Verified on both prod nodes (served page carries `poll-start`, the
+`unauthenticated` broadcast, `jitterMs=750`, `5000/45000`) and public
+end-to-end. Backups: `/var/tmp/loan-pollfix3-20261019/`.
+
+**Lesson recorded:** "harmless at this scale" was an unmeasured assertion
+covering a regression I had introduced. Measure the thing, including the metric
+you did not originally choose — here, the gaps rather than the count.
+
+**Prod verification** (both nodes, direct on `:81` to spend none of the login
+rate-limit budget): logged-out poll 401 JSON via the central path; login lands
+on `/`; authed poll 200; served dashboard carries `minIntervalMs=5000`,
+`maxIntervalMs=45000`, `BroadcastChannel` and `X-Requested-With`. Return-URL
+regression passes on prod. Idle suppression re-confirmed from KeyDB db1 -
+`__expire` unchanged across a poll, +10s after a real page. Public end-to-end
+through the proxy returns the JSON 401. Backups:
+`/var/tmp/loan-pollfix2-20261019/` on both nodes. The stale "polls once a
+second" rationale in `web.php`'s `absoluteAuthTimeout` comment was corrected.
+
+### Duplicate-function / dead-code scan (2026-10-19)
+
+Run at the client's request after the poller work, over `protected/` excluding
+the vendored framework: 125 files, 296 methods.
+
+**Fixed — both introduced by me today:**
+
+- **`ipInCidr()` in `protected/config/env.php` was dead.** Removing the
+  `REMOTE_ADDR`/`TRUSTED_PROXY_CIDRS` gate from `web.php` earlier today deleted
+  its only caller, leaving 25 lines of unreferenced CIDR-matching code in a
+  security-relevant config file - exactly the kind of thing a later reader
+  assumes is still enforcing something. Removed, and the surviving
+  `parseCidrList()` docblock no longer name-drops it. `parseCidrList()` itself
+  is still live (`web.php:11`, feeding `request.trustedHosts`), which is why the
+  `Secure` cookie flag was re-tested on both prod nodes after the removal - it
+  is the behaviour that path actually feeds.
+- **Two scheduling paths in the dashboard poller.** Every call site used
+  `schedule()` except the initial timer, which called `setTimeout(poll, ...)`
+  directly and so skipped `schedule()`'s clear-existing-timer guard. Harmless at
+  init (there is no timer yet) but a second way to do one job. Unified; exactly
+  one `setTimeout(poll` remains, inside `schedule()`.
+
+**Found, pre-existing, NOT touched - these need a decision:**
+
+1. **`getAssignedStaff()` is triplicated**, byte-identical in `Loan`, `Market`
+   and `Customer`:
+   `return $this->hasOneIncludingTrashed(User::findWithDeleted(), ['id' => 'assigned_staff_id']);`
+   I added the third copy (Customer) during the per-staff scoping work; Loan
+   dates to the initial commit and Market to 2026-09-17. All three models
+   already `use IncludesTrashedRelations`, which is where
+   `hasOneIncludingTrashed()` lives - so that trait is the natural home and the
+   merge is a three-line deletion plus one addition. Not done unprompted because
+   it touches three models used throughout the app.
+2. **`KeydbCache::existsValue()` is unreachable.** The vendored
+   `yii\caching\Cache::exists()` implements itself via `getValue()`, and
+   `KeydbCache` does not override `exists()`, so nothing in the app *or* the
+   framework can call it. From the initial commit.
+3. **`DashboardCache::getRecentActivity()` (13 lines) plus its only caller
+   `computeRecentActivity()` (45 lines) are dead** - ~58 lines with no reference
+   anywhere, including views. From 2026-09-17 (Markets). Looks like a recent
+   activity panel that was built and never wired up.
+
+**Verified clean:** no duplicate function definitions in the poller (one IIFE,
+each of `poll`/`schedule`/`nextDelay`/`debounce`/`applyTotals`/`formatCurrency`
+defined once), no declared-but-unused JS variables, and no unused PHP imports in
+the files touched.
+
+**Two bugs in my own scanners, worth recording** since both produced confident
+false findings before being caught:
+- `re.sub(r'//.*', '', body, flags=re.S)` - `re.S` makes `.` cross newlines, so
+  a single `//` comment swallowed the rest of each method body and any methods
+  sharing a prefix hashed as identical. It reported three duplicate groups; the
+  corrected scan reports one. Strip line comments with `//[^\n]*` and *only*
+  block comments with DOTALL.
+- A word-boundary grep for imports misses `use X as Y`: it flagged
+  `yii\web\Request` in `WebUser.php` as unused when it is imported as
+  `WebRequest` and used at line 111.
+
+### Dedupe + dead-code removal applied (2026-10-19)
+
+All three items from the scan above, implemented and deployed.
+
+**1. `getAssignedStaff()` deduplicated — but NOT into the trait I first
+recommended.** The earlier note said to fold it into `IncludesTrashedRelations`.
+Checking before merging showed that would have been a latent bug:
+`IncludesTrashedRelations` is used by **five** models (ActivityLog, Repayment,
+Loan, Customer, Market) while only **three** tables have `assigned_staff_id`
+(verified against `information_schema`). Defining the relation there would hand
+ActivityLog and Repayment a relation to a column they do not have.
+
+Instead a narrow `app\models\HasAssignedStaff` trait now holds the single
+definition, used by exactly the three models that have the column - matching the
+existing `HasContactRules` precedent. It documents its dependency on
+`IncludesTrashedRelations` (for `hasOneIncludingTrashed()`) and why the
+soft-deleted staff account must still resolve. `getAssignedStaff` is now defined
+once in the whole codebase; Market's "never dereferences null" rationale was
+carried into the trait docblock rather than dropped.
+
+**2. `KeydbCache::existsValue()` removed** - unreachable, since the vendored
+`Cache::exists()` routes through `getValue()` and `exists()` is not overridden.
+
+**3. `DashboardCache` recent-activity feed removed** - 85 lines
+(`getRecentActivity()` + `computeRecentActivity()`), referenced nowhere
+including views. Removing it orphaned two more things, both also removed:
+the `ACTIVITY_LIMIT` constant and the `use app\models\Repayment;` import. Both
+files are tracked in git (last touched in `9f53560`), so the feed is recoverable
+with `git show` if it was an unshipped feature rather than an accident.
+
+**Verified** - because this touched three models consumed app-wide. Locally,
+every page and export that reads the relation: dashboard, loan/index,
+customer/index, market/index, loan/view, customer/view, dashboard/staff,
+report/loans, report/overdue, and the `?export=csv` variants of loans /
+outstanding / overdue - all 200, no "Unknown column" or
+"Call to a member function" anywhere, **0 blank staff cells** in loan/index and
+**0 empty staff fields** in the CSV (names render, e.g. "Amaka Nwachukwu").
+On both prod nodes the same set returns 200 with the CSV staff column populated
+("Sandra"), `dashboard/poll` still 200 (KeydbCache intact) and the dashboard
+still renders (DashboardCache intact). Public end-to-end unaffected.
+Backups: `/var/tmp/loan-dedupe-20261019/` on both nodes.
+
+## 2026-10-19 — F1 (throttle fail-open) and F2 (password change didn't evict sessions) fixed and deployed
+
+Client chose the DB-backed counter for F1 and the credential stamp for F2.
+
+### F1 — failed-login counter moved from the cache to the database
+
+New table via `m261019_210000_create_login_attempt_table`
+(`username` PK, `attempts`, `expires_at` + index). `LoginForm` now does one
+atomic upsert per failure:
+
+```sql
+INSERT INTO login_attempt (username, attempts, expires_at) VALUES (:name, 1, :expires)
+ON DUPLICATE KEY UPDATE
+    attempts   = IF(expires_at > :now1, attempts + 1, 1),
+    expires_at = IF(expires_at > :now2, expires_at, :expires2)
+```
+
+Distinct `:now1`/`:now2` placeholders because PDO only permits reusing a named
+parameter when prepare emulation happens to be on. The upsert is retried once on
+failure: Galera certifies cluster-wide, so two nodes incrementing the *same*
+username in the same instant can have one transaction aborted, and a 500 on the
+login form would be worse than one uncounted attempt. Expired rows are purged
+opportunistically (1-in-50, using the `expires_at` index) so an attacker cycling
+usernames cannot grow the table without bound.
+
+This also fixes a second defect: the cache counter was **per node**, so the real
+limit was `MAX_FAILED_ATTEMPTS` per node rather than overall.
+
+`KeydbCache::increment()` and `::getCounter()` existed solely for this counter,
+so both were removed in the same change (33 lines) rather than left as dead code.
+
+### F2 — a password change now ends that account's existing sessions
+
+`m261019_200000_add_password_changed_at_to_user` adds a nullable
+`password_changed_at`, stamped in `User::setPassword()` - the single choke point
+every password change already routes through. `WebUser::afterLogin()` records
+the stamp in the session and a new per-request `logoutIfCredentialChanged()`
+compares it, calling `logout(false)` on a mismatch.
+
+Nullable with no backfill, and a session carrying no stamp *adopts* the current
+value rather than being logged out, so deploying this signed nobody out
+(verified: 0 users had a stamp immediately after migration).
+
+**A bug caught in local testing, worth recording:** the first version stored
+`null` for "never changed" and gated on `Session::has()`. `has()` uses isset()
+semantics and so returns **false** for a stored null - the check therefore took
+its adopt branch on every request and silently re-stamped, meaning the
+NULL → timestamp transition (every user's *first* password change, i.e. exactly
+the case the feature exists for) was never detected. `stampOf()` now normalises
+to `int`, with `0` meaning "never changed".
+
+### Verified locally
+F1: 5 attempts then locked with redis up **and with redis stopped** (the original
+failure mode - previously 12+ went unthrottled); a successful login clears the
+counter; per-username isolation holds (locking A leaves B alone); an expired
+window restarts at 1 rather than resuming; the purge removes expired rows and
+leaves live ones. F2: no spurious logout over repeated requests; eviction on
+NULL→stamp *and* stamp→stamp; another user's session unaffected; and via the
+**real admin form**, changing a user's password evicted that user's live session
+while the admin's own session continued. `password_changed_at` is not in
+`rules()` and a POSTed `User[password_changed_at]=0` was rejected, so it is not
+mass-assignable. All three roles still log in and load their pages.
+
+### Prod deployment
+Migrations were deployed and run **before** the code, since the code references a
+column and table that must already exist or every login would 500. The app DB
+user is deliberately data-only, so: `GRANT ALTER, CREATE, INDEX` (the minimum -
+no DROP, no REFERENCES) → migrate on one node → `REVOKE` unconditionally in the
+same command. Grants confirmed back to `SELECT, INSERT, UPDATE, DELETE` on
+**both** nodes afterwards, DDL replicated by Galera (column + table + PK + index
+present on both), cluster Synced size 2 throughout.
+
+Verified on prod: throttle locks at 5 on node A, and node B reports THROTTLED on
+its **first** attempt for that username - proving the counter is now shared
+rather than per node. F2 evicts on both nodes. Full smoke across dashboard,
+customer/loan/market/user indexes, reports, CSV export and the poll endpoint:
+200 with zero SQL errors on both nodes; public login page 200, poll 401 JSON,
+HumHub unaffected. Probe rows removed by exact username; `login_attempt` left at
+0 rows. Backups: `/var/tmp/loan-f1f2-20261019/`.
+
+## 2026-10-20 — Every inline `style=""` in the views was dead under the CSP (fixed)
+
+The client's browser console on `/import/customers` (production) reported four
+blocked declarations:
+
+```
+Content-Security-Policy: The page's settings blocked an inline style
+(style-src-attr) from being applied because it violates the following
+directive: "style-src 'self'"
+Source: align-items: flex-start; flex-direction:…
+Source: margin-bottom: 1rem;
+Source: width:100%;   (x2)
+Source: margin-top: 0.5rem;
+```
+
+**A nonce cannot fix this.** CSP nonces apply to `<style>` *elements*, not to
+`style=""` *attributes* — the browser's own suggestion is `'unsafe-hashes'`
+plus a SHA-256 per declaration. So the only options were to weaken the policy
+or to move the declarations into the stylesheet.
+
+**Scope was far larger than the four reported.** The reported page was one of
+nine: a grep for `style="` plus `'style' =>` option arrays found **52
+occurrences across 9 view files**, 16 distinct declarations. `customer/view.php`
+alone had 25. All of them had been inert in **every** browser since the CSP was
+introduced — including in dev, because `app\components\Csp` sets the header on
+every response in both environments. The markup rendered, the declaration was
+dropped, nothing was logged (there is no `report-uri`). Fixing them therefore
+*changed* how those pages look: it restored the layout that was originally
+intended, verified by screenshot at 1280px and 390px.
+
+### HumHub cross-reference — deliberate NON-borrow
+
+Checked per the standing instruction. HumHub hits this same problem and solves
+it by permitting inline styles outright: its default policy
+(`protected/humhub/config/web.php`) is
+
+```
+default-src *; img-src https://* http://* * data:;
+script-src {{ nonce }} 'self' https://* http://* * 'unsafe-inline' 'report-sample';
+style-src * https://* http://* * 'unsafe-inline';
+```
+
+and it uses inline `style=""` in 31 of its own view files. Adopting HumHub's
+approach would have fixed all 52 instantly by adding `'unsafe-inline'` to
+`style-src`. **Rejected**: HumHub's CSP wildcards every source and is close to
+decorative, whereas this app's is strict and deliberately so (documented in
+`app\components\Csp`'s docblock). Trading a real policy for a permissive one to
+avoid a stylesheet edit is the wrong trade for an app holding customer
+financial data. What *was* taken from HumHub here is the confirmation that a
+nonce is not an option for style attributes — HumHub does not attempt it
+either.
+
+### What changed
+
+`static/css/app.css` gained 11 classes (not 16 — several declarations were
+shared, and some were already covered):
+
+| Replaces | Class | Uses |
+|---|---|---|
+| `font-size:0.78rem; color:var(--color-muted); uppercase…` | `.detail-label` | 7 |
+| `display:block; font-size:0.95rem;` | `.detail-value` | 7 |
+| `cursor: default;` | `.record-card-static` | 7 |
+| `margin-top:-0.6rem;` | `.field-hint` | 6 |
+| `margin-top:0.3rem;` | `.field-hint-inset` | 2 |
+| `margin-top:1.5rem;` on `<h2>` | `.section-heading` | 2 |
+| `margin-left:0.4rem;` on a badge | `.badge-inline` | 2 |
+| `display:flex; align-items:center; gap:.5rem; flex-shrink:0` | `.record-actions` | 2 |
+| `margin-bottom:2rem;` on a record list | `.record-list-spaced` | 2 |
+| `grid-template-columns: …minmax(150px,1fr)` | `.quick-actions-grid-wide` | 1 |
+| the CSV upload card + its icon/form/label/button | `.import-card` (+3 scoped descendant rules) | 1 |
+
+Two cases needed **no** new class:
+
+- `max-width: 480px` (5 forms) reuses the **existing** `.narrow-form`, which was
+  already defined at the bottom of `app.css` and already in use on three other
+  forms (`guarantor/form`, `repayment/update`, `loan/update`). This conversion
+  had evidently been started before and abandoned half-done. Adding a
+  `.form-narrow` would have been a near-duplicate class — caught by checking for
+  collisions before writing any CSS.
+- `style="display:inline"` (2 forms) was simply **deleted**: those elements
+  already carry `.inline-form`, which sets `display: inline-block`. The inline
+  style was redundant *and* contradicted the class.
+
+One judgment call left alone: `.record-card:hover` applies a lift/shadow, which
+is wrong for the now-static detail cards. The original author wrote only
+`cursor: default`, so only that was reproduced; suppressing the hover is a
+separate design decision, flagged rather than taken.
+
+### Verified locally
+
+- `grep` for `style="` and `'style' =>` across `protected/views`: **0 remaining**.
+- `php -l` clean on all 11 edited views.
+- 10 authenticated routes fetched: all HTTP 200, **0 inline style attributes** in
+  the rendered HTML. With zero style attributes left there is nothing for the
+  browser to block — a structural proof the console errors are gone, rather than
+  an eyeball of a console.
+- Rendered screenshots at 1280×1000 and 390×900 of `import/customers`,
+  `customer/view`, `user/index`, `report/index`, `customer/create`: layouts
+  render as intended, mobile stacks correctly, bottom nav intact.
+
+## 2026-10-20 — Per-market balances on the dashboard + market drill-down (client request, LOCAL ONLY)
+
+Client request (via Tamax, 20 Oct): the owner wants each market's balance shown
+separately on her dashboard instead of one combined figure, and wants clicking a
+market to show that market's customers with money in / money out / balance
+remaining, "more like your OPay in/out".
+
+Built and verified on the laptop. **Not deployed.**
+
+### Data layer
+
+`Market::balanceRows()` - one aggregate query, per market: customer count,
+`disbursed` (SUM of loan.principal_amount), `collected` (SUM of repayment.amount)
+and `outstanding` (SUM of total_repayment - paid, open loans only). Shaped like
+`User::staffPerformanceRows()`, which it sits beside in `DashboardCache`.
+
+`Market::customerBalanceRows($marketId)` - the same three figures per customer
+within one market, for the drill-down.
+
+Two details exist so the per-market figures reconcile with the dashboard's
+single "Outstanding balance" tile, which sums every open loan regardless of
+market:
+
+- **`customer.market_id` is NULLABLE.** A customer can sit outside every market,
+  and their money would silently vanish from a naive breakdown. Those loans come
+  back as a synthetic `id => null` row ("No market assigned"), shown only when it
+  holds something. Dev data currently has none, but production may.
+- **Soft-deleted customers** are excluded from `customer_count` but their loans
+  still count toward the money, because that debt is already inside the headline
+  total.
+
+Verified: per-market outstanding sums to 221,250.00, exactly matching
+`DashboardCache::getTotals()['outstandingBalance']`.
+
+### Security finding fixed along the way (pre-existing)
+
+`DashboardController::actionPoll()` returned `DashboardCache::getTotals()`
+**wholesale**. That array is one shared cache entry computed for everybody, and
+the dashboard *view* is what filters it by role. So the JSON bypassed the filter
+entirely: confirmed live on the laptop that **staff1 received every other staff
+member's name, active loan count and total collected**, while their own HTML page
+showed only "Your performance".
+
+This was pre-existing, not introduced here - but adding `marketBalances` to that
+same array would have handed every market's money to every staff member through
+the same hole. `actionPoll()` now returns only the four numeric keys the poller's
+`applyTotals()` actually reads. Verified: `staffPerformance` and `marketBalances`
+both absent from the payload for staff and admin alike.
+
+### Visibility
+
+The dashboard breakdown is gated on **`viewAllCustomers`** (manager + admin;
+staff has neither that nor `manageMarkets`). A market's totals aggregate
+customers belonging to several different staff, so showing one staff member a
+market figure would expose colleagues' collections. Filtered in the view, not in
+`DashboardCache`, for the same reason the staff table is - one shared cache entry.
+
+`market/view` is covered by MarketController's existing blanket `manageMarkets`
+rule, which carries no `actions` list, so the new action needed no RBAC change.
+
+### Verified locally
+
+| check | result |
+|---|---|
+| dashboard breakdown: admin / manager / staff | visible / visible / **hidden** |
+| `market/view?id=7`: admin / manager / staff | 200 / 200 / **403** |
+| poll payload leaks market or staff data | **no**, for staff and admin |
+| bad ids (999999, 0, -1, abc) | 404, never 500 |
+| rendered figures vs direct SQL | exact match |
+| per-market sum vs headline total | reconciles |
+| inline styles on new pages (CSP) | 0 |
+| mobile 390px | tiles stack, table scrolls, bottom nav intact |
+
+### Open judgment call
+
+Staff currently see no market breakdown at all. If the client wants a staff
+member to see *their own* market, that needs a decision on what the figure means -
+the market's whole balance (which includes other staff's customers) or only that
+staff member's slice of it. Left alone pending her answer.
+
+### Phase close-out: the four mandatory checks (2026-10-20, re-run at depth)
+
+The first pass of these was judged too shallow by the client ("status codes and a
+timing loop"). Re-run properly; findings below.
+
+**1. Security.** Mapped the change's actual surface rather than running a
+checklist. New entry points: one route (`market/view`), one new SQL fragment set,
+one new key inside the *shared* `dashboard_totals` cache entry.
+
+- *Serialization boundary* - this is where the real finding was. `getTotals()`
+  has exactly two consumers (`actionIndex` -> view, which filters by role; and
+  `actionPoll`). Only one JSON endpoint exists in the whole app (`actionPoll`;
+  `WebUser` emits a 401 body). `actionPoll` was returning the shared array raw,
+  so a staff member received every colleague's name, loan count and collections -
+  **confirmed live before fixing**, and it would have leaked every market's money
+  once `marketBalances` joined that array. Now whitelisted to the four keys the
+  poller reads.
+- `$totals` never reaches the inline JS (only pollUrl/loginUrl/version do).
+- No market data exists in any report or CSV export; staff gets 403 on every
+  market and report route, and their poll payload contains zero market strings.
+- SQL: no user input reaches raw SQL. `$open` is interpolated from the
+  `Loan::OPEN_STATUSES` class constant via `quoteValue()`; `$marketId` is a
+  typed `int` parameter, bound.
+- XSS: tested with `<script>alert(1)</script>"><img src=x>` as a market name -
+  escaped on dashboard, market list and drill-down, with the page's script-tag
+  count unchanged at its baseline of 5. Probe rows deleted by exact id + content.
+- Enumeration: soft-deleted and never-existed ids both 404, so no oracle. HPP
+  (`?id=7&id=13`) 404. POST to `view` 403.
+- Audit: no read action is audited anywhere in this app, so `market/view` not
+  logging is consistent rather than a new gap.
+
+**2. Performance.** Measured on production data (79 customers, 110 loans, 217
+repayments), not the 7-loan dev set that made the first pass meaningless.
+
+- `balanceRows()` all markets 2.01ms; single market 1.33ms; `customerBalanceRows`
+  1.45ms; full uncached `computeTotals()` 4.57ms. (Re-measured later under live
+  load at 4.98/3.03/2.63/14.26ms - same work, a busy server; treat single-run
+  figures on a live box as indicative, not precise.)
+- Fixed: `actionView()` was computing **every** market's aggregates to render
+  one page. Now filtered in SQL - same query, same formula, so the drill-down
+  cannot disagree with the dashboard tile. 0.70ms -> 0.36ms on dev.
+- **A/B against the obvious alternative**: rewriting the derived table as a
+  correlated subquery is **slower** - 1.91ms vs 2.43ms on prod data, identical
+  results. The "optimisation" would have been a 27% regression, so the derived
+  table stays.
+- Plan: every join is indexed (`idx-customer-market_id`, 
+  `idx-loan-customer_id-created_at`, derived `key0`). The single unindexed access
+  is the derived table itself: `repayment ALL, 217 rows, Using temporary; Using
+  filesort`. Its cost is O(total repayments) and independent of how many markets
+  are being viewed.
+- **Where it turns bad:** this is a daily-collection business, so repayments grow
+  roughly loans x collection-days - on current numbers order 25k rows/year. The
+  dashboard path is bounded (60s cache), but `market/view` runs it per request.
+  The fix when it matters is a covering index on `repayment (loan_id, amount)`,
+  turning the GROUP BY into an index-only scan. **Not applied**: it is a schema
+  change needing a migration and a temporary DDL grant, and 217 rows do not
+  justify it. Revisit around 20-50k repayments.
+
+**3. Duplicate functions.** Found a true duplicate **introduced by this change**:
+the three money expressions were written verbatim twice inside `Market.php`.
+Consolidated into `moneyAggregates()` + `loanJoins()`, so a market's total and
+the sum of its customers' rows are the same numbers by construction. The counts
+beside them (`customer_count` vs `loan_count`) differ legitimately and were left
+alone. Verified identical output after the merge: reconciliation holds,
+single-market == all-markets row, customer rows sum to the market row.
+
+Wider finding, **not** fixed here: the outstanding-balance formula now exists in
+four places (`ReportController::actionOutstanding`, `DashboardCache`,
+`Market`, `Loan::remainingBalance`). Pre-existing spread, worth one consolidation
+pass of its own rather than mid-deploy.
+
+**4. Could I have done it better** - as a comparison, not a borrow/don't-borrow.
+
+| approach | better at | worse at |
+|---|---|---|
+| **Static methods on the AR model returning plain rows (chosen)** | matches the two existing precedents here (`User::staffPerformanceRows()`, `computeTotals()`); one round trip; no AR hydration on a cached path; conditional aggregates read clearly; measured fastest | not composable (a date filter means editing the method); untyped arrays; `Market.php` accumulating reporting logic |
+| **HumHub's service class** (`activity/services/GroupingService`: `final class`, constructor-injected subject, memoized `_groupedUsers`) | keeps the AR model thin; easy to test; a natural home as reporting grows | ceremony for two methods; diverges from this codebase's pattern; no perf gain |
+| **Composable ActiveQuery** (HumHub `Group::getSubGroupUsers()` returns the query, `...Count()` executes it) | caller composes further - date ranges, pagination; framework-idiomatic binding | conditional aggregates + derived join still need `Expression` strings; the measured variant of this shape was 27% slower |
+
+**Verdict:** keep the current shape, and take one idea from the comparison -
+HumHub's memoization is already provided a level up by `DashboardCache`, so it
+would be redundant here. The composable-query advantage is real but only pays off
+once a second dimension is requested. **The trigger to move to a service /
+query-returning shape is the first request for a date range or a per-staff slice
+of a market** - which the open "should staff see their own market" question would
+itself trigger. Signature `balanceRows(?int $marketId = null)` is already
+extensible without a breaking change.
+
+### Fallback review — see FALLBACK_REVIEW.md (2026-10-22)
+
+Full investigation of every fallback path in the 19-22 Oct work. Eight items,
+all awaiting a client decision, so they live in `FALLBACK_REVIEW.md` rather than
+here (this file records what is *done*).
+
+Headline, **live on production**: the market drill-down's summary tiles and its
+customer list disagree - AGBARA by ₦24,000, EDU by ₦100,000 - because 3
+soft-deleted customers hold live loans, and `balanceRows()` counts their money
+while `customerBalanceRows()` omits them from the list. Both behaviours were
+deliberate and are individually defensible; together on one page they do not add
+up. The pre-deploy check that should have caught it verified reconciliation on
+**dev**, which has zero soft-deleted customers - a test run against data
+incapable of exhibiting the fault.
+
+## 2026-10-23 — Customers page: Active/Deleted/All filter tabs (client request)
+
+The client found the Customers page confusing — the "Deleted customers" link
+sat directly above the live list and read as a heading, so the live customers
+looked deleted. Asked to make deleted vs non-deleted easily identifiable; chose
+filter tabs over an inline-mixed list or a clearer separate link.
+
+**What changed (LOCAL ONLY, not deployed):**
+- `CustomerController::actionIndex()` takes a `filter` param: `active` (default,
+  `Customer::find()`), `deleted` (`findTrashed()`), `all` (`findWithTrashed()`).
+  `scopeVisible()` wraps the chosen base, so a staff member sees only their own
+  in every tab; an unknown value falls back to `active` (the tab never widens
+  scope, only picks a soft-delete state).
+- `customer/index.php`: a tab strip (Active/Deleted/All), each link keeping the
+  current search/date/sort/staff params via `Url::current()` and only swapping
+  `filter`. Deleted rows get a red "Deleted" badge, a faded row (`.is-deleted`),
+  and a Restore button in place of the view chevron (view 404s on a trashed
+  row). The old "Deleted customers" link is removed.
+- `static/css/app.css`: `.record-tabs/.record-tab`, `.badge-deleted` (reuses the
+  error-color tokens, defined in both themes), `.record-card.is-deleted`,
+  `.btn-restore`.
+
+**Verified by execution (WAF-off HTTP, positive controls):**
+- admin: active=6, deleted=2 (both badged, 2 restore btns), all=8, garbage→active=6.
+- staff1 scopeVisible holds in every tab: deleted tab = own deleted only, NOT a
+  colleague's (no leak); all tab = own live + own deleted.
+- Restore from the tab works (302, `deleted_at` cleared); still gated by
+  `isVisibleToCurrentUser()` server-side (a staff restoring a colleague's by id
+  → 403, from the earlier trash test).
+- Tab links preserve `q`/`from`/etc across switches; Active drops the param for a
+  clean URL.
+- 0 inline styles (CSP). `php -l` clean. Screenshot confirms badges/fade/Restore.
+
+### Close-out checks
+- **Security:** `filter` is whitelisted (`in_array`), never reaches SQL; unknown
+  → active. All three bases wrapped by `scopeVisible`. Restore is POST-only +
+  CSRF + visibility-checked. No enumeration/scope-widening (tested).
+- **Performance:** the `all` query is the `active` query minus the
+  `deleted_at IS NULL` predicate, same indexes, same `with()` eager-loads, capped
+  at pageSize 20. No new N+1; `deleted_at` is already on the model (no extra
+  query for the badge).
+- **Duplicate functions:** the Restore form (`beginForm(.../restore)+submitButton`)
+  now appears in both `_trash_table.php` and `customer/index.php` — 2 lines in
+  different layout contexts (table cell vs card action). Left inline rather than
+  extracting a partial; a shared partial for 2 lines across unlike contexts is
+  not worth the indirection. Flagged, not hidden.
+- **Could I have done better / open items:**
+  1. `customer/trash.php` + `actionTrash()` are now **orphaned** — the Deleted
+     tab supersedes them and no view links to `customer/trash` anymore (only a
+     comment references it). Two ways to see deleted customers now exist. Kept
+     working (not removed) since removing an action is beyond the ask —
+     **flagged for a decision**: remove the redundant customer trash action+view
+     (keep `_trash_table`, which `market/trash` still uses), or leave it.
+  2. `market/index.php` has the **same** confusing `Deleted markets` link pattern
+     (line 20). Not touched (client asked about customers), but it's the same
+     issue — the tabs could be applied there too.
+
+### 2026-10-23 (same day) — Markets got the same tabs; redundant trash removed; tab strip deduped
+
+Client: apply the customers tab design to Markets, and remove the now-redundant
+trash action+view.
+
+- **Markets tabs:** `MarketController::actionIndex()` takes the same `filter`
+  param (active/deleted/all → find/findTrashed/findWithTrashed); no scopeVisible
+  (markets are manageMarkets-only, manager/admin see all). `market/index.php`
+  renders the tab strip, badges deleted rows (`tr.is-deleted` fade), and shows
+  Restore in place of Edit/Delete on a trashed row (`market/update` 404s on one).
+  `actionRestore` now redirects to `['index','filter'=>'deleted']` instead of
+  the removed trash page. Verified: admin/manager all three tabs correct, staff
+  403, restore-from-tab works, `?filter=junk`→active.
+
+- **Redundant trash removed (dead-code cleanup):** the Deleted tab fully
+  supersedes the separate trash pages, which nothing linked to any more. Removed
+  `CustomerController::actionTrash`, `MarketController::actionTrash`,
+  `views/customer/trash.php`, `views/market/trash.php`, and the shared
+  `views/_trash_table.php` (its only two callers were those trash views). The
+  `actionRestore` methods stay (the tab Restore buttons use them). Verified
+  `/customer/trash` and `/market/trash` now 404, no dangling references remain,
+  no access/verb rule was orphaned (both controllers use blanket role rules).
+
+- **Dedup — shared tab partial:** the 12-line tab strip was byte-identical in
+  both index views, so it was extracted to `views/_record_tabs.php` (takes
+  `$filter`; `Url::current()` is request-based, so it is route-agnostic). Both
+  views render `//_record_tabs`; the now-unused `use Url` import was dropped from
+  each. Verified the partial renders the correct active-tab marker and preserves
+  params in both lists.
+
+Net dead-code delta this change: **−5 files** (3 trash views removed, 1 partial
+added, net −2 view files; 2 controller actions removed). The restore FORM is
+still inlined in both index views (2 lines, different table/card markup) — left
+as-is, same call as before.

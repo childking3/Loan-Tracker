@@ -14,8 +14,18 @@ use yii\base\Model;
  */
 class LoginForm extends Model
 {
-    public ?string $username = null;
-    public ?string $password = null;
+    /**
+     * Untyped (really ?string): load() assigns whatever was posted, and a
+     * typed property made `LoginForm[username][]=x` a TypeError/500 for an
+     * unauthenticated request. The string rule below rejects non-strings
+     * before validatePassword() ever looks the user up.
+     *
+     * @var string|null
+     */
+    public $username;
+
+    /** @var string|null see $username */
+    public $password;
 
     /**
      * Bcrypt hash of an arbitrary string, not a real credential - cost 13
@@ -41,6 +51,7 @@ class LoginForm extends Model
     {
         return [
             [['username', 'password'], 'required'],
+            [['username', 'password'], 'string'],
             ['password', 'validatePassword'],
         ];
     }
@@ -64,11 +75,7 @@ class LoginForm extends Model
             return;
         }
 
-        $throttleKey = $this->throttleKey();
-        // getCounter(), not get(): this key is written by increment()'s
-        // raw Redis INCR, not cache->set()'s serialized format - calling
-        // get() against it throws (see KeydbCache::getCounter()).
-        if (Yii::$app->cache->getCounter($throttleKey) >= self::MAX_FAILED_ATTEMPTS) {
+        if ($this->failedAttempts() >= self::MAX_FAILED_ATTEMPTS) {
             $this->addError($attribute, 'Too many failed login attempts. Try again in a few minutes.');
             return;
         }
@@ -78,20 +85,113 @@ class LoginForm extends Model
         $valid = Yii::$app->security->validatePassword((string) $this->password, $hash);
 
         if ($user === null || !$valid) {
-            // Atomic increment (see app\components\KeydbCache::increment) -
-            // not get()-then-set(), which raced under concurrent attempts
-            // against the same username (see that method's docblock).
-            Yii::$app->cache->increment($throttleKey, self::LOCKOUT_SECONDS);
+            $this->recordFailedAttempt();
             $this->addError($attribute, 'Incorrect username or password.');
             return;
         }
 
-        Yii::$app->cache->delete($throttleKey);
+        $this->clearFailedAttempts();
     }
 
-    private function throttleKey(): string
+    /**
+     * The counter lives in the database, not the cache (changed 2026-10-19).
+     *
+     * The cache-backed version failed OPEN: KeydbCache::run() returns its
+     * fallback when the store is unreachable, so the gate read 0 and the
+     * increment recorded nothing - measured as 12 unthrottled wrong passwords
+     * with redis stopped, while valid logins still worked so nothing looked
+     * broken. App node .3 ran with its KeyDB instance dead until 2026-10-19,
+     * which means roughly half of all login traffic had no brute-force
+     * protection at all. The counter was also per node, making the real limit
+     * MAX_FAILED_ATTEMPTS *per node* rather than overall.
+     *
+     * The database cannot fail open here: a login attempt cannot be evaluated
+     * without it, and being Galera-replicated the counter is shared by both
+     * nodes. See AUTH_SESSION_REVIEW.md F1.
+     */
+    private function throttleName(): string
     {
-        return 'login-attempts:' . strtolower((string) $this->username);
+        return strtolower((string) $this->username);
+    }
+
+    private function failedAttempts(): int
+    {
+        return (int) Yii::$app->db->createCommand(
+            'SELECT attempts FROM {{%login_attempt}} WHERE username = :name AND expires_at > :now',
+            [':name' => $this->throttleName(), ':now' => time()]
+        )->queryScalar();
+    }
+
+    /**
+     * One atomic upsert, so concurrent attempts against the same username
+     * cannot lose increments the way a read-then-write would. A window that
+     * has already expired restarts at 1 rather than resuming an old count.
+     *
+     * Distinct :now1/:now2 placeholders because PDO only allows a named
+     * parameter to be reused when prepare emulation happens to be on.
+     */
+    private function recordFailedAttempt(): void
+    {
+        $now = time();
+        $sql = 'INSERT INTO {{%login_attempt}} (username, attempts, expires_at)
+                VALUES (:name, 1, :expires)
+                ON DUPLICATE KEY UPDATE
+                    attempts = IF(expires_at > :now1, attempts + 1, 1),
+                    expires_at = IF(expires_at > :now2, expires_at, :expires2)';
+        $params = [
+            ':name' => $this->throttleName(),
+            ':expires' => $now + self::LOCKOUT_SECONDS,
+            ':expires2' => $now + self::LOCKOUT_SECONDS,
+            ':now1' => $now,
+            ':now2' => $now,
+        ];
+
+        try {
+            Yii::$app->db->createCommand($sql, $params)->execute();
+        } catch (\Throwable $e) {
+            // Galera certifies writes cluster-wide, so two nodes incrementing
+            // the SAME username in the same instant can have one transaction
+            // aborted. Retry once; only give up (logged, not fatal) if it
+            // fails again, since a 500 on the login form would be worse than a
+            // single uncounted attempt.
+            try {
+                Yii::$app->db->createCommand($sql, $params)->execute();
+            } catch (\Throwable $retry) {
+                Yii::warning('Could not record failed login attempt: ' . $retry->getMessage(), __METHOD__);
+            }
+        }
+
+        $this->purgeExpiredAttempts();
+    }
+
+    private function clearFailedAttempts(): void
+    {
+        Yii::$app->db->createCommand(
+            'DELETE FROM {{%login_attempt}} WHERE username = :name',
+            [':name' => $this->throttleName()]
+        )->execute();
+    }
+
+    /**
+     * Opportunistic, so an attacker cycling through usernames cannot grow the
+     * table without bound. Probabilistic rather than scheduled: this app has no
+     * reliable cron on both nodes, and the index on expires_at makes the sweep
+     * cheap when it does run.
+     */
+    private function purgeExpiredAttempts(): void
+    {
+        if (random_int(1, 50) !== 1) {
+            return;
+        }
+
+        try {
+            Yii::$app->db->createCommand(
+                'DELETE FROM {{%login_attempt}} WHERE expires_at < :now',
+                [':now' => time()]
+            )->execute();
+        } catch (\Throwable $e) {
+            Yii::warning('Expired login-attempt purge failed: ' . $e->getMessage(), __METHOD__);
+        }
     }
 
     public function login(): bool

@@ -52,9 +52,18 @@ class AvatarStorage
      */
     public const MAX_SIZE = 10 * 1024 * 1024;
 
-    public static function directory(): string
+    /**
+     * Sub-folders under protected/uploads/. 'avatars' is the default (staff
+     * profile pictures); customer photos use FOLDER_CUSTOMERS. Both go
+     * through the same validation and 2-level sharding below rather than a
+     * second copy of this class.
+     */
+    public const FOLDER_AVATARS = 'avatars';
+    public const FOLDER_CUSTOMERS = 'customers';
+
+    public static function directory(string $folder = self::FOLDER_AVATARS): string
     {
-        return Yii::getAlias('@app/uploads/avatars');
+        return Yii::getAlias('@app/uploads/' . $folder);
     }
 
     /**
@@ -63,9 +72,9 @@ class AvatarStorage
      * starts with two hex digits, so this never depends on the extension
      * that follows.
      */
-    public static function path(string $filename): string
+    public static function path(string $filename, string $folder = self::FOLDER_AVATARS): string
     {
-        return self::directory() . '/' . substr($filename, 0, 1) . '/' . substr($filename, 1, 1) . '/' . $filename;
+        return self::directory($folder) . '/' . substr($filename, 0, 1) . '/' . substr($filename, 1, 1) . '/' . $filename;
     }
 
     /**
@@ -73,7 +82,7 @@ class AvatarStorage
      * it. Does not touch the database or delete any previous file - the
      * caller (User::saveAvatar()) owns both of those.
      */
-    public static function save(UploadedFile $file): string
+    public static function save(UploadedFile $file, string $folder = self::FOLDER_AVATARS): string
     {
         // Belt-and-suspenders beyond the model's FileValidator rule
         // (extensions + maxSize + checkExtensionByMimeType): confirms the
@@ -84,24 +93,29 @@ class AvatarStorage
         }
 
         $filename = Uuid::v4() . '.' . strtolower((string) $file->extension);
-        $path = self::path($filename);
+        $path = self::path($filename, $folder);
         FileHelper::createDirectory(dirname($path));
         if (!$file->saveAs($path)) {
-            throw new RuntimeException('Could not save uploaded avatar.');
+            throw new RuntimeException('Could not save uploaded image.');
         }
 
         return $filename;
     }
 
-    public static function delete(?string $filename): void
+    public static function delete(?string $filename, string $folder = self::FOLDER_AVATARS): void
     {
         if ($filename === null) {
             return;
         }
 
-        $path = self::path($filename);
-        if (is_file($path)) {
-            unlink($path);
+        $path = self::path($filename, $folder);
+        // Best-effort by design (a leftover orphan file costs disk space,
+        // not correctness - the DB row's own filename column is what the
+        // app actually reads), but a failure used to vanish with no trace
+        // at all; worth a log line so a run of them (permissions drift,
+        // e.g.) is at least visible to someone reading the log.
+        if (is_file($path) && !@unlink($path)) {
+            Yii::warning("Could not delete avatar file: {$path}", __METHOD__);
         }
     }
 }

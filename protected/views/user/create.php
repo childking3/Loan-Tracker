@@ -16,7 +16,7 @@ $this->title = 'New staff account';
 
 <?= $this->render('//_error_list', ['model' => $model]) ?>
 
-<?= Html::beginForm('', 'post', ['enctype' => 'multipart/form-data', 'style' => 'max-width: 480px;']) ?>
+<?= Html::beginForm('', 'post', ['enctype' => 'multipart/form-data', 'class' => 'narrow-form']) ?>
     <label><?= Html::encode($model->getAttributeLabel('full_name')) ?>
         <?= Html::activeTextInput($model, 'full_name') ?>
     </label>
@@ -38,7 +38,7 @@ $this->title = 'New staff account';
         <?php else: ?>
             <input type="text" value="Staff" disabled>
             <?= Html::activeHiddenInput($model, 'role', ['value' => User::ROLE_STAFF]) ?>
-            <p class="muted" style="margin-top: 0.3rem;">As a manager, new accounts you create are always staff-role - the server also enforces this regardless of what's submitted here.</p>
+            <p class="muted field-hint-inset">As a manager, new accounts you create are always staff-role - the server also enforces this regardless of what's submitted here.</p>
         <?php endif; ?>
     </label>
 

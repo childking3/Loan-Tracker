@@ -96,10 +96,30 @@ class ImportController extends Controller
         $imported = 0;
         $errors = [];
 
+        // Deliberately scanned across ALL customers, not just the ones the
+        // importer may see: a phone number that already exists belongs to
+        // somebody regardless of whose customer they are, and scoping this
+        // to visible customers would let a staff member import duplicates
+        // of a colleague's customers - a data-integrity problem, not a
+        // privacy win.
+        //
+        // What IS scoped is the name in the resulting message. Reporting
+        // "phone X already belongs to <name>" to a staff member who cannot
+        // see that customer would leak exactly what the per-staff scoping
+        // exists to prevent - a colleague's customer name, and by
+        // extension their phone number, straight out of an import report.
+        // So the owner is carried alongside, and the name is only shown
+        // when the importer is entitled to it.
+        $canSeeEveryCustomer = Yii::$app->user->can('viewAllCustomers');
+        $currentUserId = (int) Yii::$app->user->id;
+
         $existingPhones = [];
-        foreach (Customer::find()->select(['phone', 'full_name'])->asArray()->batch(500) as $batch) {
+        foreach (Customer::find()->select(['phone', 'full_name', 'assigned_staff_id'])->asArray()->batch(500) as $batch) {
             foreach ($batch as $row) {
-                $existingPhones[$row['phone']] = $row['full_name'];
+                $ownedByImporter = (int) $row['assigned_staff_id'] === $currentUserId;
+                $existingPhones[$row['phone']] = $canSeeEveryCustomer || $ownedByImporter
+                    ? $row['full_name']
+                    : null;
             }
         }
 
@@ -115,7 +135,7 @@ class ImportController extends Controller
             ];
         }
 
-        $header = fgetcsv($handle);
+        $header = fgetcsv($handle, 0, ',', '"', '');
 
         if ($header === false || array_map('trim', $header) !== self::EXPECTED_HEADER) {
             fclose($handle);
@@ -128,7 +148,7 @@ class ImportController extends Controller
         $rowNumber = 1;
         $dataRowCount = 0;
         $truncated = false;
-        while (($row = fgetcsv($handle)) !== false) {
+        while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
             $rowNumber++;
 
             // Checked against total lines scanned, not $dataRowCount: a
@@ -156,6 +176,13 @@ class ImportController extends Controller
             $customer->phone = trim((string) $phone);
             $customer->address = trim((string) $address);
             $customer->created_by = Yii::$app->user->id;
+            // Same ownership rule the registration form uses, shared via
+            // the model so the two can't drift. Import has no market
+            // column, so for a staff member this is always themselves,
+            // and for an admin/manager it is NULL - the imported rows are
+            // admin/manager-only until somebody assigns them, which is
+            // reported in the import summary rather than left silent.
+            $customer->assigned_staff_id = Customer::defaultOwnerForCurrentUser(null);
 
             if (!$customer->validate()) {
                 if (count($errors) < self::MAX_REPORTED_ERRORS) {
@@ -164,16 +191,37 @@ class ImportController extends Controller
                 continue;
             }
 
-            if (isset($existingPhones[$customer->phone])) {
+            // array_key_exists, NOT isset(): a masked owner is stored as
+            // null above, and isset() is false for null - which would let
+            // every duplicate of a customer the importer cannot see pass
+            // straight through and be created again.
+            if (array_key_exists($customer->phone, $existingPhones)) {
                 if (count($errors) < self::MAX_REPORTED_ERRORS) {
-                    $errors[] = "Row {$rowNumber}: skipped, phone {$customer->phone} already belongs to {$existingPhones[$customer->phone]}.";
+                    $owner = $existingPhones[$customer->phone];
+                    $errors[] = $owner === null
+                        ? "Row {$rowNumber}: skipped, phone {$customer->phone} already belongs to another customer."
+                        : "Row {$rowNumber}: skipped, phone {$customer->phone} already belongs to {$owner}.";
                 }
                 continue;
             }
 
-            $customer->save(false);
-            $existingPhones[$customer->phone] = $customer->full_name;
-            $imported++;
+            // Per-row, not left to propagate: an unguarded save() failing on
+            // row N of a file with up to 2000 rows used to 500 the whole
+            // request, leaving every already-saved row before N (each its
+            // own auto-committed statement, not one shared transaction)
+            // durably in the database but never reaching the summary audit
+            // call below at all - real customers with zero audit trail.
+            // Caught here, counted as a row error, and the loop continues.
+            try {
+                $customer->save(false);
+                $existingPhones[$customer->phone] = $customer->full_name;
+                $imported++;
+            } catch (\Throwable $e) {
+                Yii::error("Import row {$rowNumber} failed to save: " . (string) $e, __METHOD__);
+                if (count($errors) < self::MAX_REPORTED_ERRORS) {
+                    $errors[] = "Row {$rowNumber}: could not be saved - see the server log for details.";
+                }
+            }
         }
 
         fclose($handle);
@@ -188,11 +236,20 @@ class ImportController extends Controller
         // a 2000-row file would otherwise multiply the audit log by up to
         // 2000 rows for a single click. Individual customers are still
         // identifiable via their own customer_create rows if ever needed.
-        AuditLogger::audit('customer_import', null, null, null, [
-            'imported' => $imported,
-            'rows_seen' => $dataRowCount,
-            'error_count' => count($errors),
-        ]);
+        // Guarded on its own: with every row now caught above, this can
+        // only itself fail (a Galera hiccup on the audit insert) - if it
+        // does, the import already happened for real, so log it rather
+        // than 500 and hide a genuinely successful (if unaudited) import
+        // from the user.
+        try {
+            AuditLogger::audit('customer_import', null, null, null, [
+                'imported' => $imported,
+                'rows_seen' => $dataRowCount,
+                'error_count' => count($errors),
+            ]);
+        } catch (\Throwable $e) {
+            Yii::error('Import summary audit row not written: ' . (string) $e, __METHOD__);
+        }
 
         return ['imported' => $imported, 'errors' => $errors];
     }

@@ -21,6 +21,10 @@ class DashboardController extends Controller
             'access' => [
                 'class' => AccessControl::class,
                 'rules' => [
+                    // Unauthenticated polls are answered with a JSON 401 by
+                    // app\components\WebUser::loginRequired(), centrally, so
+                    // there is deliberately no per-action rule here - see that
+                    // class and the HumHub cross-reference in CODEBASE.md.
                     [
                         'allow' => true,
                         'roles' => ['viewDashboard'],
@@ -41,8 +45,12 @@ class DashboardController extends Controller
     /**
      * Drill-down from the dashboard's staff performance table - same
      * viewDashboard permission, since the table itself already shows
-     * every staff member's counts to every other. Admins are excluded
-     * here too (see DashboardCache::computeTotals()). Directly linked
+     * every staff member's counts to every other. Admin and manager
+     * accounts are excluded here too, matching User::staffPerformanceRows()
+     * (widened from admin-only to admin+manager by the 2026-09-18
+     * security audit + client decision - a manager who personally records
+     * a repayment or gets a loan assigned was otherwise reachable here the
+     * same as a plain staff member). Directly linked
      * from every staff name in dashboard/index.php's table, so any
      * staff member can open any colleague's page this way - not just
      * reachable by guessing an id. Individual loan numbers in this
@@ -59,8 +67,21 @@ class DashboardController extends Controller
             throw new NotFoundHttpException('Staff member not found.');
         }
 
-        if (in_array((int) $staff->id, User::adminIds(), true)) {
-            throw new ForbiddenHttpException('Admin accounts are not tracked in staff performance.');
+        if (in_array((int) $staff->id, array_merge(User::adminIds(), User::managerIds()), true)) {
+            throw new ForbiddenHttpException('Admin and manager accounts are not tracked in staff performance.');
+        }
+
+        // Per-staff customer separation (2026-10-16): this page lists a
+        // staff member's loans together with their customers' names, so
+        // leaving it open to every colleague would hand back exactly what
+        // the customer scoping takes away. A staff member keeps their own
+        // page - seeing your own figures isn't the thing being
+        // restricted - and manager/admin keep everyone's, which is what
+        // the drill-down exists for. This replaces the earlier deliberate
+        // decision that any staff member could open any colleague's page
+        // (documented above); the client's brief overrides it.
+        if (!Yii::$app->user->can('viewAllLoans') && (int) $staff->id !== (int) Yii::$app->user->id) {
+            throw new ForbiddenHttpException('You are not allowed to view another staff member\'s page.');
         }
 
         $loans = Loan::find()
@@ -78,9 +99,15 @@ class DashboardController extends Controller
 
         $totalCollected = (float) Repayment::find()->andWhere(['recorded_by_staff_id' => $staff->id])->sum('amount');
 
+        // One GROUP BY query for every loan on this page instead of one
+        // cache/SQL round trip per row in the view - same N+1 fix already
+        // applied to ReportController/DashboardCache.
+        $balances = Loan::remainingBalancesFor($loans);
+
         return $this->render('staff', [
             'staff' => $staff,
             'loans' => $loans,
+            'balances' => $balances,
             'countsByStatus' => $countsByStatus,
             'totalCollected' => round($totalCollected, 2),
         ]);
@@ -104,10 +131,25 @@ class DashboardController extends Controller
             return ['version' => $currentVersion, 'changed' => false];
         }
 
+        // Whitelisted, NOT the whole getTotals() array. That array is one
+        // shared cache entry computed for everybody, so role filtering is
+        // done by the view (see dashboard/index.php). Returning it raw here
+        // bypassed that filter entirely: a staff member polling received
+        // every other staff member's name, loan count and total collected,
+        // and would also have received every market's money once the market
+        // breakdown was added. These four are the only keys applyTotals()
+        // in the poller actually reads.
+        $totals = DashboardCache::getTotals();
+
         return [
             'version' => $currentVersion,
             'changed' => true,
-            'totals' => DashboardCache::getTotals(),
+            'totals' => [
+                'activeLoanCount' => $totals['activeLoanCount'],
+                'overdueLoanCount' => $totals['overdueLoanCount'],
+                'outstandingBalance' => $totals['outstandingBalance'],
+                'todaysCollections' => $totals['todaysCollections'],
+            ],
         ];
     }
 }

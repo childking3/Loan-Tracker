@@ -25,6 +25,11 @@ function loadEnv(string $path): void
         )) {
             $value = substr($value, 1, -1);
         }
+        // A variable already set in the real environment wins over .env,
+        // so a one-off command can override e.g. DB_USER without editing the file.
+        if (getenv($key) !== false) {
+            continue;
+        }
         putenv("$key=$value");
         $_ENV[$key] = $value;
     }
@@ -61,36 +66,11 @@ function requireEnv(array $keys): void
 }
 
 /**
- * IPv4-only CIDR match (no IPv6 seen anywhere in this deployment). $cidr
- * may be a bare IP (treated as /32) or a real block ("10.10.2.0/24").
- * Used by web.php to check REMOTE_ADDR against trusted proxy subnets
- * before Yii::$app exists to do that matching itself.
- */
-function ipInCidr(string $ip, string $cidr): bool
-{
-    if (!str_contains($cidr, '/')) {
-        return $ip === $cidr;
-    }
-
-    [$subnet, $bits] = explode('/', $cidr, 2);
-    $ipLong = ip2long($ip);
-    $subnetLong = ip2long($subnet);
-    $bits = (int) $bits;
-    if ($ipLong === false || $subnetLong === false || $bits < 0 || $bits > 32) {
-        return false;
-    }
-
-    $mask = $bits === 0 ? 0 : (-1 << (32 - $bits));
-
-    return ($ipLong & $mask) === ($subnetLong & $mask);
-}
-
-/**
  * Parses a comma-separated list of CIDR blocks/IPs (as stored in
  * TRUSTED_PROXY_CIDRS) into a clean array, dropping blanks - so a
  * trailing comma or extra whitespace in .env doesn't produce a stray
- * empty-string entry that ipInCidr()/trustedHosts would have to guard
- * against separately.
+ * empty-string entry that Yii's own trustedHosts matching would have to
+ * guard against separately.
  */
 function parseCidrList(string $value): array
 {

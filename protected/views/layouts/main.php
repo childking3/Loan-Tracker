@@ -16,24 +16,31 @@ use yii\helpers\Url;
  */
 $currentController = \Yii::$app->controller->id;
 $currentAction = \Yii::$app->controller->action->id ?? '';
-$navLink = static function (string $route, string $label, bool $exact = false) use ($currentController, $currentAction) {
+
+/**
+ * Shared by $navLink/$bottomNavLink below - both need exactly this "is the
+ * given route the current page" check, previously copy-pasted into each
+ * closure (found by the 2026-09-18 duplicate-function audit; CODEBASE.md
+ * already documented the intent to keep one source of truth here but the
+ * code itself was never actually factored out until now).
+ */
+$isActiveRoute = static function (string $route, bool $exact) use ($currentController, $currentAction): bool {
     [$controllerId, $actionId] = array_pad(explode('/', $route), 2, 'index');
-    $isActive = $exact
+    return $exact
         ? ($controllerId === $currentController && $actionId === $currentAction)
         : ($controllerId === $currentController);
-    return Html::a($label, [$route], ['class' => $isActive ? 'is-active' : '']);
+};
+
+$navLink = static function (string $route, string $label, bool $exact = false) use ($isActiveRoute) {
+    return Html::a($label, [$route], ['class' => $isActiveRoute($route, $exact) ? 'is-active' : '']);
 };
 
 /**
  * Same active-route logic as $navLink, wrapping an icon + label instead of
  * plain text - the bottom-nav's own item shape.
  */
-$bottomNavLink = static function (string $route, string $label, string $icon, bool $exact = false) use ($currentController, $currentAction) {
-    [$controllerId, $actionId] = array_pad(explode('/', $route), 2, 'index');
-    $isActive = $exact
-        ? ($controllerId === $currentController && $actionId === $currentAction)
-        : ($controllerId === $currentController);
-    $class = 'bottom-nav-item' . ($isActive ? ' is-active' : '');
+$bottomNavLink = static function (string $route, string $label, string $icon, bool $exact = false) use ($isActiveRoute) {
+    $class = 'bottom-nav-item' . ($isActiveRoute($route, $exact) ? ' is-active' : '');
     return Html::a('<svg class="icon" viewBox="0 0 24 24">' . $icon . '</svg>' . Html::encode($label), [$route], ['class' => $class]);
 };
 
@@ -121,6 +128,47 @@ $navToggleJs = <<<'JS'
     });
 })();
 JS;
+
+/**
+ * Confirmation prompt for destructive buttons. Marked up as data-confirm="..."
+ * instead of an inline onclick="return confirm(...)": the site's CSP does not
+ * allow inline event handlers, so the old form silently never ran and the
+ * action went ahead without asking. One delegated, nonce'd listener covers every
+ * such button (clicks, including Enter-key form submission).
+ */
+$confirmJs = <<<'JS'
+(function () {
+    document.addEventListener('click', function (event) {
+        var target = event.target.closest ? event.target.closest('[data-confirm]') : null;
+        if (target && !window.confirm(target.getAttribute('data-confirm'))) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    }, true);
+})();
+JS;
+
+/**
+ * Cache-busting for the stylesheet.
+ *
+ * The prod vhost serves /static with `Cache-Control: public, max-age=36000`
+ * (10 hours) and the URL carries no version, so without this a returning
+ * browser pairs freshly deployed markup with a stylesheet up to 10 hours
+ * stale - any class added in that deploy resolves to nothing and the page
+ * renders worse than it did before. That is not hypothetical: the 2026-10-20
+ * inline-style removal moved 52 declarations into new classes, so a cached
+ * stylesheet would have left those elements unstyled.
+ *
+ * `?v=<filemtime>` is Yii's own mechanism (AssetManager::$appendTimestamp,
+ * which emits exactly `"$assetUrl?v=$timestamp"`) and what HumHub enables by
+ * default (humhub/components/assets/AssetManager.php). This app links the
+ * file directly rather than through an asset bundle, so the query string is
+ * built here instead. filemtime() is a single stat, served from PHP's stat
+ * cache, and rsync preserves mtimes so both app nodes emit the same URL.
+ */
+$cssFile = Yii::getAlias('@webroot') . '/static/css/app.css';
+$cssVersion = @filemtime($cssFile);
+$cssUrl = '/static/css/app.css' . ($cssVersion > 0 ? '?v=' . $cssVersion : '');
 ?>
 <?php $this->beginPage() ?>
 <!DOCTYPE html>
@@ -131,7 +179,7 @@ JS;
     <?= Html::csrfMetaTags() ?>
     <title><?= Html::encode($this->title ?? 'DMC Sparkle Services') ?></title>
     <?= Html::script($themeInitJs, ['nonce' => \Yii::$app->csp->getNonce()]) ?>
-    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="<?= Html::encode($cssUrl) ?>">
     <?php $this->head() ?>
 </head>
 <body>
@@ -173,6 +221,7 @@ JS;
     <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Switch to dark mode">Dark mode</button>
     <?= Html::script($themeToggleJs, ['nonce' => \Yii::$app->csp->getNonce()]) ?>
     <?= Html::script($navToggleJs, ['nonce' => \Yii::$app->csp->getNonce()]) ?>
+    <?= Html::script($confirmJs, ['nonce' => \Yii::$app->csp->getNonce()]) ?>
 </header>
 <main>
     <?= $content ?>

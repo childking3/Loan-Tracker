@@ -53,8 +53,14 @@ class User extends ActiveRecord implements IdentityInterface
      * password_hash. Required only on SCENARIO_CREATE; blank on update
      * means "keep current password" (UserController checks for a
      * non-empty value before calling setPassword() again).
+     *
+     * $password and $role are untyped (really ?string): both are safe
+     * attributes, and a typed property made a posted array a TypeError/500
+     * instead of a validation error. The string / in-range rules reject it.
+     *
+     * @var string|null
      */
-    public ?string $password = null;
+    public $password;
 
     /**
      * RBAC role - virtual, not a column (assignment lives in
@@ -62,14 +68,22 @@ class User extends ActiveRecord implements IdentityInterface
      * so it validates and renders through the normal load()/dropdown flow
      * instead of a raw, unvalidated $_POST read.
      */
-    public ?string $role = null;
+    public $role;
 
     /**
      * Write-only - saveAvatar() stores it via AvatarStorage and writes
      * only the resulting filename to avatar_filename. Optional on every
      * scenario, matching $password's "blank means no change" precedent.
+     *
+     * Untyped (really ?UploadedFile) on purpose: it is a safe attribute, so
+     * load() assigns any posted `User[avatarFile]` string to it, and a typed
+     * property turned a crafted POST into a TypeError/500. Controllers
+     * always overwrite it with UploadedFile::getInstanceByName() AFTER
+     * load(), so a posted string never reaches validation or storage.
+     *
+     * @var UploadedFile|null
      */
-    public ?UploadedFile $avatarFile = null;
+    public $avatarFile;
 
     public static function tableName(): string
     {
@@ -84,6 +98,16 @@ class User extends ActiveRecord implements IdentityInterface
     public static function find(): ActiveQuery
     {
         return parent::find()->andWhere(['deleted_at' => null]);
+    }
+
+    /**
+     * Live and soft-deleted accounts together, for relations that must keep
+     * showing a name on historical records (a loan whose assigned staff
+     * member was later deleted). Never use for login or uniqueness checks.
+     */
+    public static function findWithDeleted(): ActiveQuery
+    {
+        return parent::find();
     }
 
     public function behaviors(): array
@@ -138,6 +162,12 @@ class User extends ActiveRecord implements IdentityInterface
     public function setPassword(string $password): void
     {
         $this->password_hash = Yii::$app->security->generatePasswordHash($password);
+        // Stamped here, the single choke point for every password change
+        // (UserController create + update both route through this), so that
+        // app\components\WebUser can log out sessions established under the
+        // old credential. Without it, resetting a compromised account's
+        // password left the intruder logged in - see AUTH_SESSION_REVIEW.md F2.
+        $this->password_changed_at = time();
     }
 
     public function generateAuthKey(): void
@@ -195,34 +225,76 @@ class User extends ActiveRecord implements IdentityInterface
     }
 
     /**
+     * @return array<int, int>
+     */
+    public static function managerIds(): array
+    {
+        return array_map('intval', Yii::$app->authManager->getUserIdsByRole(self::ROLE_MANAGER));
+    }
+
+    /**
      * A ' AND <alias>.id NOT IN (...)' SQL fragment (empty string if there
-     * are no admins) plus its bound parameters, for excluding admin
-     * accounts from a raw staff-performance query. Consolidated from two
-     * identical copies (DashboardCache::computeTotals(),
-     * ReportController::actionStaff()) found during a duplicate-code
-     * scan - both built this exact placeholder loop independently.
-     * Admins are excluded from staff performance by explicit request:
-     * that table tracks loan officers doing collections, not the accounts
-     * managing them.
+     * are no admins/managers) plus its bound parameters, for excluding
+     * management accounts from a raw staff-performance query. Renamed and
+     * widened from the admin-only excludeAdminsSql() during the
+     * 2026-09-18 security audit + client decision: a manager who
+     * personally records a repayment or gets a loan assigned was showing
+     * up in staff-performance data/drill-downs the same as a plain staff
+     * member - the docblock's own original reasoning ("tracks loan
+     * officers doing collections, not the accounts managing them") always
+     * implied this, it just hadn't been applied to managers, only admins.
      *
      * @return array{0: string, 1: array<string, int>}
      */
-    public static function excludeAdminsSql(string $alias = 'u'): array
+    public static function excludeManagementSql(string $alias = 'u'): array
     {
-        $adminIds = self::adminIds();
-        if ($adminIds === []) {
+        $excludedIds = array_merge(self::adminIds(), self::managerIds());
+        if ($excludedIds === []) {
             return ['', []];
         }
 
         $params = [];
         $placeholders = [];
-        foreach ($adminIds as $index => $adminId) {
-            $placeholder = ':admin' . $index;
+        foreach ($excludedIds as $index => $excludedId) {
+            $placeholder = ':mgmt' . $index;
             $placeholders[] = $placeholder;
-            $params[$placeholder] = $adminId;
+            $params[$placeholder] = $excludedId;
         }
 
         return [' AND ' . $alias . '.id NOT IN (' . implode(',', $placeholders) . ')', $params];
+    }
+
+    /**
+     * Shared staff-performance query, consolidated from two identical
+     * copies (DashboardCache::computeTotals(), ReportController::
+     * actionStaff()) found by the 2026-09-18 duplicate-function audit.
+     * Returns the superset of columns - each caller reads whichever it
+     * needs and ignores the rest (Dashboard ignores overdue_loans, Report
+     * ignores id). Correlated subqueries rather than a JOIN + GROUP BY: a
+     * staff member with multiple loans and multiple repayments would
+     * inflate both counts through the JOIN's cross-product before
+     * aggregation.
+     *
+     * @return array<int, array{id: string, full_name: string, active_loans: string, overdue_loans: string, total_collected: string}>
+     */
+    public static function staffPerformanceRows(): array
+    {
+        [$excludeManagement, $managementParams] = self::excludeManagementSql('u');
+        $params = array_merge([
+            ':active' => 'active',
+            ':overdue' => 'overdue',
+            ':statusActive' => self::STATUS_ACTIVE,
+        ], $managementParams);
+
+        return Yii::$app->db->createCommand(
+            'SELECT u.id, u.full_name,
+                    (SELECT COUNT(*) FROM {{%loan}} l WHERE l.assigned_staff_id = u.id AND l.status = :active) AS active_loans,
+                    (SELECT COUNT(*) FROM {{%loan}} l WHERE l.assigned_staff_id = u.id AND l.status = :overdue) AS overdue_loans,
+                    (SELECT COALESCE(SUM(r.amount), 0) FROM {{%repayment}} r WHERE r.recorded_by_staff_id = u.id) AS total_collected
+             FROM {{%user}} u
+             WHERE u.status = :statusActive' . $excludeManagement . '
+             ORDER BY u.full_name'
+        )->bindValues($params)->queryAll();
     }
 
     /**

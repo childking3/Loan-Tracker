@@ -1,0 +1,23 @@
+# Per-node file at /etc/keydb/loan.conf (lsyncd excludes /etc/keydb/**, so
+# each node keeps its own). Identical on both nodes; nothing to substitute.
+#
+# Local-only, no password, no replication: chosen for speed. Each node's
+# app talks to its own instance over 127.0.0.1, and the two caches are
+# independent. HumHub's KeyDB instances are not touched.
+
+port 6381
+bind 127.0.0.1
+protected-mode yes
+
+# Pure cache: nothing here is worth persisting.
+save ""
+appendonly no
+dir /run/keydb-loan
+pidfile /run/keydb-loan/keydb.pid
+logfile ""
+loglevel notice
+
+maxmemory 64mb
+# Only keys with a TTL are evictable; the dashboard version counter has no TTL.
+maxmemory-policy volatile-lru
+databases 4

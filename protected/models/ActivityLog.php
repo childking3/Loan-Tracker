@@ -16,6 +16,8 @@ use yii\db\ActiveRecord;
  */
 class ActivityLog extends ActiveRecord
 {
+    use IncludesTrashedRelations;
+
     public static function tableName(): string
     {
         return '{{%activity_log}}';
@@ -23,7 +25,8 @@ class ActivityLog extends ActiveRecord
 
     public function getUser(): ActiveQuery
     {
-        return $this->hasOne(User::class, ['id' => 'user_id']);
+        // Includes soft-deleted accounts, otherwise a deleted staff member's actions read as "system".
+        return $this->hasOneIncludingTrashed(User::findWithDeleted(), ['id' => 'user_id']);
     }
 
     /**
@@ -72,6 +75,9 @@ class ActivityLog extends ActiveRecord
         'full_name' => 'Full name',
         'phone' => 'Phone',
         'address' => 'Address',
+        'gender' => 'Gender',
+        'photo_filename' => 'Photo',
+        'market_id' => 'Market',
         'relationship' => 'Relationship to borrower',
         'occupation' => 'Occupation',
         'loan_id' => 'Loan',
@@ -82,7 +88,7 @@ class ActivityLog extends ActiveRecord
         'email' => 'Email',
         'deleted_at' => 'Deleted',
         'loan_amount' => 'Loan amount',
-        'repayment_period_days' => 'Repayment period (days)',
+        'repayment_period_days' => 'Repayment period (working days)',
         'is_active' => 'Active',
         'name' => 'Package name',
         'role' => 'Role',

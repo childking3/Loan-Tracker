@@ -10,6 +10,10 @@ loadEnv(__DIR__ . '/../.env');
 requireEnv(['DB_DSN', 'DB_USER', 'DB_PASSWORD', 'COOKIE_VALIDATION_KEY', 'APP_HOST_INFO']);
 
 return [
+    // Sessions and logs. Defaults to protected/runtime; set RUNTIME_PATH to a
+    // path outside any lsyncd-mirrored tree on nodes that mirror each other.
+    'runtimePath' => env('RUNTIME_PATH', dirname(__DIR__) . '/runtime'),
+
     // 'log' must be in bootstrap, not just 'components' - a component only
     // listed under 'components' is built lazily on first use, but nothing
     // in the normal request path ever asks for 'log' by name, so its
@@ -32,6 +36,7 @@ return [
             'host' => env('REDIS_HOST', '127.0.0.1'),
             'port' => (int) env('REDIS_PORT', 6379),
             'database' => (int) env('REDIS_DATABASE', 0),
+            'password' => env('REDIS_PASSWORD'),
             'keyPrefix' => 'loantracker_cache:',
             'serializer' => ['igbinary_serialize', 'igbinary_unserialize'],
         ],
@@ -41,6 +46,7 @@ return [
             'host' => env('REDIS_HOST', '127.0.0.1'),
             'port' => (int) env('REDIS_PORT', 6379),
             'database' => (int) env('REDIS_DATABASE', 0),
+            'password' => env('REDIS_PASSWORD'),
             'keyPrefix' => 'loantracker_schema:',
             'serializer' => ['igbinary_serialize', 'igbinary_unserialize'],
         ],
@@ -60,7 +66,7 @@ return [
                 [
                     'class' => 'yii\log\FileTarget',
                     'levels' => ['error', 'warning'],
-                    'logFile' => '@app/runtime/logs/app.log',
+                    'logFile' => '@runtime/logs/app.log',
                     'maxFileSize' => 5120,
                     'maxLogFiles' => 5,
                     'except' => ['yii\web\HttpException:404'],
@@ -70,7 +76,22 @@ return [
                     // again, so it's excluded specifically rather than
                     // dropping all of $_SERVER, keeping the rest
                     // (REQUEST_URI, method, etc.) for debugging.
-                    'logVars' => ['_GET', '_POST', '_FILES', '_SERVER', '!_SERVER.HTTP_COOKIE'],
+                    //
+                    // '!_POST.LoginForm.password' / '!_POST.User.password':
+                    // a CSRF/validation failure (or any other exception) on
+                    // a login or staff-account POST used to write the
+                    // submitted password into this file in plaintext -
+                    // confirmed already happened repeatedly in this dev
+                    // log before this fix (2026-09-28). ArrayHelper::filter
+                    // unsets just that one leaf and keeps the rest of
+                    // $_POST for debugging, same mechanism as the cookie
+                    // exclusion above.
+                    'logVars' => [
+                        '_GET', '_POST', '_FILES', '_SERVER',
+                        '!_SERVER.HTTP_COOKIE',
+                        '!_POST.LoginForm.password',
+                        '!_POST.User.password',
+                    ],
                 ],
             ],
         ],

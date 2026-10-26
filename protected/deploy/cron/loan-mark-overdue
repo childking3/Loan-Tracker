@@ -1,0 +1,14 @@
+#!/bin/sh
+# Installed as /usr/local/bin/loan-mark-overdue and called from
+# /etc/cron.d/loan-management (lsyncd mirrors /etc but EXCLUDES /usr/local/**,
+# so this script must be copied to BOTH nodes by hand). Only the node that currently
+# owns 10.10.10.4 (the node whose cron daemon runs; cron is off on .3 so HumHub's cron does not double-run) does the work, so the loans are never marked (and audited)
+# twice by two nodes. If node .4 is down the job simply does not run;
+# run it by hand on .3:  LOAN_FORCE=1 /usr/local/bin/loan-mark-overdue
+if [ -z "$LOAN_FORCE" ] && ! ip -4 -o addr show | grep -q ' 10\.10\.10\.4/'; then
+    exit 0
+fi
+/usr/bin/install -d -o loanapp -g loanapp -m 0750 /run/loan-app/cli
+/usr/sbin/runuser -u loanapp -- env RUNTIME_PATH=/run/loan-app/cli \
+    /usr/bin/php /var/www/loan-management/protected/yii loan/mark-overdue 2>&1 \
+    | logger -t loan-mark-overdue

@@ -11,11 +11,14 @@ use yii\db\ActiveRecord;
  * table (see m260916_100000_add_customer_id_to_guarantor's docblock for
  * why): the original per-loan guarantor (loan_id set, zero or more per
  * loan, added from loan/view.php) and a baseline per-customer guarantor
- * captured once at registration (customer_id set, at most one per
- * customer by construction - CustomerController::actionCreate() is the
- * only writer and never runs twice for the same customer - not editable
- * afterward). A row always has exactly one of loan_id/customer_id set,
- * enforced by a DB CHECK constraint, not just application code.
+ * captured at registration (customer_id set, at most one per customer:
+ * CustomerController::actionCreate() writes it once, and
+ * GuarantorController::actionCreateForCustomer() only adds one when the
+ * customer has none). Both kinds are editable in place afterward through
+ * GuarantorController::actionUpdate(), which never changes which loan or
+ * customer a row belongs to. A row always has exactly one of
+ * loan_id/customer_id set, enforced by a DB CHECK constraint, not just
+ * application code.
  *
  * loan_id/customer_id are both absent from rules(): both controllers
  * that create a guarantor always scope it to the loan/customer in their

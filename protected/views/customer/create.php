@@ -3,6 +3,9 @@
 /** @var \yii\web\View $this */
 /** @var \app\models\Customer $model */
 /** @var \app\models\Guarantor $guarantor */
+/** @var \app\models\Loan $loan */
+/** @var array $packageOptions */
+/** @var array $staffOptions */
 /** @var \app\models\Customer[] $duplicates */
 /** @var array $marketOptions */
 
@@ -23,13 +26,16 @@ $this->title = 'Register New Customer';
                 <li><?= Html::a(Html::encode($duplicate->full_name), ['customer/view', 'id' => $duplicate->id]) ?></li>
             <?php endforeach; ?>
         </ul>
-        <p>Submitting again will create this customer anyway.</p>
+        <p>Submitting again will create this customer anyway. If you chose a photo, select it again first - a browser can't keep a chosen file across this warning.</p>
     </div>
 <?php endif; ?>
 
 <?= $this->render('_form', [
     'model' => $model,
     'guarantor' => $guarantor,
+    'loan' => $loan,
+    'packageOptions' => $packageOptions,
+    'staffOptions' => $staffOptions,
     'marketOptions' => $marketOptions,
     'confirmDuplicate' => $duplicates !== [],
 ]) ?>

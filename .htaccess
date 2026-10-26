@@ -23,6 +23,21 @@
     Header always set Referrer-Policy "same-origin"
     Header always set Permissions-Policy "geolocation=(), camera=(), microphone=()"
     Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+    # Static-asset Cache-Control is deliberately NOT set here. It already
+    # exists at the vhost level on both prod app nodes
+    # (/etc/apache2/sites-available/loan-management.conf, a <DirectoryMatch>
+    # for static/ covering css/js/png/jpg/jpeg/svg/ico/woff/woff2 at
+    # max-age=36000) - added at the original 2026-09-21 go-live cutover but
+    # never reflected back into this repo. A 2026-09-28 audit initially
+    # (wrongly) concluded there was no caching at all, based only on this
+    # file plus a dev-box curl check (dev's Apache has no equivalent vhost
+    # config and no mod_headers loaded at all) - added a FilesMatch block
+    # here that turned out to be dead code: Apache merges the vhost's more
+    # specific static/-scoped DirectoryMatch AFTER this file's document-root-
+    # level FilesMatch, so it always won regardless of what this file said.
+    # Removed rather than left in as misleading dead code. See
+    # PRODUCTION_READINESS.md's 2026-09-28 section for the corrected record.
 </IfModule>
 
 # Deny any dotfile at this DocumentRoot (.env, .htaccess itself, anything
@@ -78,6 +93,19 @@ RewriteEngine on
 # stops processing so this never falls through to the app's own
 # routing rule beneath it.
 RewriteRule ^humhub-1\.18\.5/ - [F,L]
+
+# Version-control metadata (.git/, .svn/, .hg/). The dotfile rule above
+# only matches a file's own *name* starting with a dot, so it never
+# covered files INSIDE a dot-directory - `/.git/HEAD` and `/.git/config`
+# were served with a plain 200 (confirmed 2026-09-20), which is enough
+# for a tool like git-dumper to reconstruct the full source and commit
+# history from an unauthenticated request. This DocumentRoot is the
+# project root itself, so .git/ sits directly inside it on any host
+# deployed by cloning or syncing the checkout. Placed before the
+# catch-all RewriteRule below for the same reason as the HumHub rule:
+# that rule only skips paths matching an existing file/directory, and
+# every path under .git/ is exactly that. [F] = 403, [L] = stop.
+RewriteRule (^|/)\.(git|svn|hg)(/|$) - [F,L]
 
 # if a directory or a file exists, use the request directly
 RewriteCond %{REQUEST_FILENAME} !-f

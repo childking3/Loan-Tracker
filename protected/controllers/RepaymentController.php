@@ -27,8 +27,30 @@ class RepaymentController extends Controller
             'access' => [
                 'class' => AccessControl::class,
                 'rules' => [
+                    // 'update' was deliberately gated stricter than
+                    // 'create' until 2026-10-16: recording a routine
+                    // payment was staff-level (manageRepayments) while
+                    // correcting one already on the books needed
+                    // manageLoans (manager/admin). The client reversed
+                    // that - staff collect the money, so staff fix their
+                    // own mistakes - and both are now manageRepayments.
+                    // What still separates a staff member from a
+                    // colleague's repayments is the row-level check in
+                    // actionUpdate(): $loan->isVisibleToCurrentUser(),
+                    // i.e. the loan must be assigned to them. Every edit
+                    // is written to the audit log either way
+                    // (repayment_update, with old and new values).
+                    // Kept as its own rule with explicit 'actions' so
+                    // ordering can't accidentally widen anything if the
+                    // two ever diverge again.
                     [
                         'allow' => true,
+                        'actions' => ['update'],
+                        'roles' => ['manageRepayments'],
+                    ],
+                    [
+                        'allow' => true,
+                        'actions' => ['create'],
                         'roles' => ['manageRepayments'],
                     ],
                 ],
@@ -37,6 +59,7 @@ class RepaymentController extends Controller
                 'class' => VerbFilter::class,
                 'actions' => [
                     'create' => ['post'],
+                    'update' => ['get', 'post'],
                 ],
             ],
         ];
@@ -154,10 +177,14 @@ class RepaymentController extends Controller
             DashboardCache::bumpVersion();
             $remaining = $loan->getRemainingBalance();
 
-            if ($remaining <= 0.0) {
-                $loan->status = 'completed';
-                $loan->save(false);
-                AuditLogger::audit('loan_status_change', 'loan', $loan->id, ['status' => 'active'], ['status' => 'completed']);
+            // syncStatusFromBalance() also covers "already overdue, still owes
+            // money" (a no-op here, since a new repayment only ever narrows the
+            // balance) - only the "just paid off" transition can actually fire
+            // from this call site.
+            $statusBefore = $loan->status;
+            if ($loan->syncStatusFromBalance($remaining)) {
+                $loan->save(false, ['status']);
+                AuditLogger::audit('loan_status_change', 'loan', $loan->id, ['status' => $statusBefore], ['status' => $loan->status]);
             }
 
             $message = 'Repayment recorded.';
@@ -170,5 +197,121 @@ class RepaymentController extends Controller
         }
 
         return $this->redirect(['loan/view', 'id' => $loan->id]);
+    }
+
+    /**
+     * Corrects a mistaken repayment's amount or date. Gated by manageLoans,
+     * not manageRepayments (which staff hold to record one) - the same
+     * "credit-control decision, distinct from staff's routine repayment
+     * work" reasoning m260910_210000_assign_manage_loans_to_manager.php
+     * already applied to loan editing applies at least as strongly to
+     * editing money already on the books. See behaviors() for the rule.
+     *
+     * Unlike LoanController::actionUpdate(), this is NOT restricted to
+     * open loans - correcting the repayment that made a loan look
+     * "completed" too early is exactly the case this exists for. A
+     * cancelled loan's status is still left alone either way, by
+     * Loan::syncStatusFromBalance().
+     */
+    public function actionUpdate($id)
+    {
+        $model = Repayment::findOne($id);
+        if ($model === null) {
+            throw new NotFoundHttpException('Repayment not found.');
+        }
+
+        $loan = $model->loan;
+        if ($loan === null || !$loan->isVisibleToCurrentUser()) {
+            throw new ForbiddenHttpException('You are not allowed to edit this repayment.');
+        }
+
+        $oldAttributes = $model->getAttributes();
+
+        if ($model->load(Yii::$app->request->post())) {
+            // Never trust a posted loan_id: this action is always scoped
+            // to the repayment named in the route.
+            $model->loan_id = $oldAttributes['loan_id'];
+
+            // NOT a plain string compare like LoanController::actionUpdate's
+            // equivalent check: amount is currency, and the posted value
+            // ("3000") and the DB's DECIMAL-formatted one ("3000.00") are
+            // the same number in different string forms - a raw string
+            // compare called that a "change" and wrote a spurious audit
+            // row (caught testing this locally before touching anything
+            // else). number_format() to 2dp normalizes both sides first.
+            $sameAmount = number_format((float) $model->amount, 2, '.', '') === number_format((float) $oldAttributes['amount'], 2, '.', '');
+            if ($sameAmount && $model->payment_date === $oldAttributes['payment_date']) {
+                Yii::$app->session->setFlash('success', 'No changes to save.');
+                return $this->redirect(['loan/view', 'id' => $loan->id]);
+            }
+
+            if ($model->validate(['amount', 'payment_date'])) {
+                // Same guard as actionCreate(): a payment can't predate the
+                // loan itself.
+                if ($model->payment_date < $loan->start_date) {
+                    $model->addError('payment_date', "Payment date cannot be before this loan's start date ({$loan->start_date}).");
+                }
+            }
+
+            if (!$model->hasErrors()) {
+                $transaction = Yii::$app->db->beginTransaction();
+                try {
+                    // Lock the loan row for the same reason every other
+                    // money-mutating action here does: serialize against a
+                    // concurrent repayment/edit on the same loan so the
+                    // balance read below is never stale.
+                    Yii::$app->db->createCommand(
+                        'SELECT id FROM {{%loan}} WHERE id = :id FOR UPDATE',
+                        [':id' => $loan->id]
+                    )->queryScalar();
+
+                    // Re-check under the lock: $loan->start_date was read
+                    // before the lock, so a concurrent LoanController::
+                    // actionUpdate() moving the loan's start date in
+                    // between could otherwise slip past the check above -
+                    // same shape as that action's own re-check of
+                    // $earliestPayment under its lock.
+                    $loan->refresh();
+                    if ($model->payment_date < $loan->start_date) {
+                        $model->addError('payment_date', "Payment date cannot be before this loan's start date ({$loan->start_date}).");
+                    }
+
+                    if ($model->hasErrors()) {
+                        $transaction->rollBack();
+                    } else {
+                        $model->save(false, ['amount', 'payment_date']);
+                        AuditLogger::audit('repayment_update', 'repayment', $model->id, $oldAttributes, $model->getAttributes());
+
+                        $remaining = Loan::remainingBalancesFor([$loan])[(int) $loan->id];
+
+                        $statusBefore = $loan->status;
+                        if ($loan->syncStatusFromBalance($remaining)) {
+                            $loan->save(false, ['status']);
+                            AuditLogger::audit('loan_status_change', 'loan', $loan->id, ['status' => $statusBefore], ['status' => $loan->status]);
+                        }
+
+                        $transaction->commit();
+                    }
+                } catch (\Throwable $e) {
+                    if ($transaction->isActive) {
+                        $transaction->rollBack();
+                    }
+                    throw $e;
+                }
+            }
+
+            if (!$model->hasErrors()) {
+                // Outside the transaction, only reached on a real commit -
+                // matches actionCreate()'s and LoanController::actionUpdate()'s
+                // own placement, so a rolled-back edit can never invalidate a
+                // cache entry that still correctly describes the unchanged row.
+                Loan::invalidateBalanceCache($loan->id);
+                DashboardCache::bumpVersion();
+                Yii::$app->session->setFlash('success', 'Repayment updated.');
+                return $this->redirect(['loan/view', 'id' => $loan->id]);
+            }
+        }
+
+        return $this->render('update', ['model' => $model, 'loan' => $loan]);
     }
 }

@@ -4,7 +4,8 @@
 /** @var \app\models\Loan $model */
 /** @var float $remainingBalance */
 /** @var \app\models\Repayment[] $repayments */
-/** @var bool $canRecordRepayment */
+/** @var array $editedRepaymentIds */
+/** @var bool $canManageRepayments record a repayment, and correct one already recorded */
 /** @var \app\models\Guarantor[] $guarantors */
 /** @var bool $canManageLoan */
 
@@ -14,7 +15,12 @@ use yii\helpers\Html;
 
 $this->title = $model->loan_number;
 ?>
-<h1><?= Html::encode($model->loan_number) ?></h1>
+<div class="page-header-row">
+    <h1><?= Html::encode($model->loan_number) ?></h1>
+    <?php if ($canManageLoan && $model->isOpenForActivity()): ?>
+        <?= Html::a('<svg class="icon" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg> Edit', ['loan/update', 'id' => $model->id], ['class' => 'btn-icon']) ?>
+    <?php endif; ?>
+</div>
 
 <?= $this->render('//_flashes') ?>
 
@@ -43,6 +49,7 @@ $this->title = $model->loan_number;
             <th>Relationship to borrower</th>
             <th>Occupation</th>
             <th>Address</th>
+            <?php if ($canManageLoan): ?><th></th><?php endif; ?>
         </tr>
         </thead>
         <tbody>
@@ -53,6 +60,9 @@ $this->title = $model->loan_number;
                 <td><?= Html::encode($guarantor->relationship ?? '') ?></td>
                 <td><?= Html::encode($guarantor->occupation ?? '') ?></td>
                 <td><?= Html::encode($guarantor->address ?? '') ?></td>
+                <?php if ($canManageLoan): ?>
+                    <td><?= Html::a('Edit', ['guarantor/update', 'id' => $guarantor->id]) ?></td>
+                <?php endif; ?>
             </tr>
         <?php endforeach; ?>
         </tbody>
@@ -98,7 +108,7 @@ $this->title = $model->loan_number;
 
 <h2>Repayments</h2>
 
-<?php if ($canRecordRepayment && $model->isOpenForActivity()): ?>
+<?php if ($canManageRepayments && $model->isOpenForActivity()): ?>
     <?= Html::beginForm(['repayment/create', 'loanId' => $model->id], 'post') ?>
         <label>
             Amount
@@ -122,14 +132,18 @@ $this->title = $model->loan_number;
             <th>Amount</th>
             <th>Payment date</th>
             <th>Recorded by</th>
+            <?php if ($canManageRepayments): ?><th></th><?php endif; ?>
         </tr>
         </thead>
         <tbody>
         <?php foreach ($repayments as $repayment): ?>
             <tr>
-                <td><?= Html::encode(Currency::format($repayment->amount)) ?></td>
+                <td><?= Html::encode(Currency::format($repayment->amount)) ?><?php if (isset($editedRepaymentIds[$repayment->id])): ?> <span class="muted-note" title="Amount or date corrected after it was recorded - see the audit log for the original value.">(edited)</span><?php endif; ?></td>
                 <td><?= Html::encode($repayment->payment_date) ?></td>
                 <td><?= Html::encode($repayment->recordedByStaff->full_name ?? '') ?></td>
+                <?php if ($canManageRepayments): ?>
+                    <td><?= Html::a('Edit', ['repayment/update', 'id' => $repayment->id]) ?></td>
+                <?php endif; ?>
             </tr>
         <?php endforeach; ?>
         </tbody>

@@ -2,6 +2,7 @@
 
 namespace app\components;
 
+use Yii;
 use yii\caching\Cache;
 
 /**
@@ -13,9 +14,18 @@ class KeydbCache extends Cache
     public string $host = '127.0.0.1';
     public int $port = 6379;
     public int $database = 0;
+    public ?string $password = null;
     public float $connectTimeout = 2.0;
+    // Separate from connectTimeout on purpose: that one only bounds the
+    // initial pconnect(). Without this, a KeyDB that accepts the connection
+    // but then stops responding mid-request (a network partition, not a
+    // clean refusal) never throws \RedisException - the socket read just
+    // blocks on PHP's default_socket_timeout (60s), stalling every request
+    // that touches cache, including the once-a-second dashboard poll and
+    // the login throttle, instead of degrading gracefully as intended.
+    public float $readTimeout = 2.0;
 
-    private \Redis $_redis;
+    private ?\Redis $_redis = null;
 
     /**
      * pconnect() rather than connect(): every call here is a single atomic
@@ -30,79 +40,71 @@ class KeydbCache extends Cache
     public function init(): void
     {
         parent::init();
-        $this->_redis = new \Redis();
-        $this->_redis->pconnect($this->host, $this->port, $this->connectTimeout);
-        if ($this->database !== 0) {
-            $this->_redis->select($this->database);
+        try {
+            $redis = new \Redis();
+            $redis->pconnect($this->host, $this->port, $this->connectTimeout);
+            $redis->setOption(\Redis::OPT_READ_TIMEOUT, $this->readTimeout);
+            if ($this->password !== null && $this->password !== '') {
+                $redis->auth($this->password);
+            }
+            if ($this->database !== 0) {
+                $redis->select($this->database);
+            }
+            $this->_redis = $redis;
+        } catch (\RedisException $e) {
+            Yii::warning('KeyDB unavailable, running without cache: ' . $e->getMessage(), __METHOD__);
+        }
+    }
+
+    /**
+     * Runs one KeyDB command. If KeyDB is down (at connect time or
+     * mid-request) the cache behaves as empty rather than taking the whole
+     * app with it: reads miss, writes are dropped, and the login throttle
+     * fails open (logged). Dashboard totals and RBAC then recompute from
+     * the database on every request until KeyDB returns.
+     */
+    private function run(callable $command, $fallback)
+    {
+        if ($this->_redis === null) {
+            return $fallback;
+        }
+        try {
+            return $command($this->_redis);
+        } catch (\RedisException $e) {
+            Yii::warning('KeyDB command failed: ' . $e->getMessage(), __METHOD__);
+            return $fallback;
         }
     }
 
     protected function getValue($key)
     {
-        $value = $this->_redis->get($key);
-        return $value === false ? false : $value;
+        return $this->run(fn ($r) => $r->get($key), false);
     }
 
     protected function setValue($key, $value, $duration)
     {
-        return $duration > 0
-            ? $this->_redis->set($key, $value, $duration)
-            : $this->_redis->set($key, $value);
+        return $this->run(
+            fn ($r) => $duration > 0 ? $r->set($key, $value, $duration) : $r->set($key, $value),
+            false
+        );
     }
 
     protected function addValue($key, $value, $duration)
     {
-        if ($duration > 0) {
-            return $this->_redis->set($key, $value, ['nx', 'ex' => $duration]);
-        }
-        return $this->_redis->setnx($key, $value);
+        return $this->run(
+            fn ($r) => $duration > 0 ? $r->set($key, $value, ['nx', 'ex' => $duration]) : $r->setnx($key, $value),
+            false
+        );
     }
 
     protected function deleteValue($key)
     {
-        return $this->_redis->del($key) > 0;
-    }
-
-    protected function existsValue($key): bool
-    {
-        return (bool) $this->_redis->exists($key);
+        return $this->run(fn ($r) => $r->del($key) > 0, false);
     }
 
     protected function flushValues()
     {
-        return $this->_redis->flushDB();
+        return $this->run(fn ($r) => $r->flushDB(), false);
     }
 
-    /**
-     * Atomic INCR-based counter for LoginForm's failed-attempt throttle,
-     * TTL set only on the request that creates the key. Replaces a prior
-     * get()-then-set(current+1) pattern: that read-modify-write race let
-     * two near-simultaneous failed attempts undercount, letting extra
-     * guesses through before lockout. INCR serializes concurrent callers
-     * on the Redis server instead of racing in PHP.
-     */
-    public function increment(string $key, int $ttl): int
-    {
-        $builtKey = $this->buildKey($key);
-        $count = (int) $this->_redis->incr($builtKey);
-        if ($count === 1) {
-            $this->_redis->expire($builtKey, $ttl);
-        }
-
-        return $count;
-    }
-
-    /**
-     * Reads a counter written by increment(), bypassing the inherited
-     * get()/getValue() path. Necessary because Cache::get() unserializes
-     * whatever getValue() returns, but increment() writes a raw integer via
-     * INCR with no serialize() step - the stock get() would throw an
-     * uncaught unserialize() error on any key increment() touched. Callers
-     * must use this instead of cache->get() for counter keys.
-     */
-    public function getCounter(string $key): int
-    {
-        $value = $this->_redis->get($this->buildKey($key));
-        return $value === false ? 0 : (int) $value;
-    }
 }

@@ -65,9 +65,9 @@ class CsvExporter
         }
 
         $handle = fopen('php://temp', 'w+');
-        fputcsv($handle, array_map([self::class, 'sanitizeCell'], $header));
+        fputcsv($handle, array_map([self::class, 'sanitizeCell'], $header), ',', '"', '');
         foreach ($rows as $row) {
-            fputcsv($handle, array_map([self::class, 'sanitizeCell'], $row));
+            fputcsv($handle, array_map([self::class, 'sanitizeCell'], $row), ',', '"', '');
         }
         rewind($handle);
         $csv = stream_get_contents($handle);

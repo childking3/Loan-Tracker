@@ -1,0 +1,69 @@
+# dmcsparklesservices.com - moved 2026-09-27 to be served from the app
+# nodes (like every other site here) instead of straight off this proxy's
+# local disk. No TLS here: Cloudflare terminates HTTPS and proxies to this
+# origin over plain HTTP, same as before. Old file kept at
+# /var/www/html/index.nginx-debian.html as an instant rollback (also see
+# about.pre-app-node-cutover.bak alongside it).
+upstream about_backend {
+    least_conn;  # stateless static content, no session affinity needed
+    server 10.10.10.3:80 max_fails=3 fail_timeout=3s;
+    server 10.10.2.5:80 max_fails=3 fail_timeout=3s;
+    server 10.10.2.4:80 max_fails=3 fail_timeout=3s;
+    server 10.10.10.4:80 max_fails=3 fail_timeout=3s;
+    keepalive_timeout 65;
+    keepalive_requests 10000;
+}
+
+server {
+    listen 80;
+    listen 81;
+    listen [::]:80;
+    listen [::]:81;
+
+    server_name dmcsparklesservices.com www.dmcsparklesservices.com;
+    server_tokens off;
+
+    # Certbot renewal still needs a local file, independent of the app-node move.
+    location ^~ /.well-known/acme-challenge/ {
+        default_type text/plain;
+        root /var/www/html;
+    }
+
+    modsecurity on;
+    modsecurity_rules_file /etc/nginx/modsec/main.conf;
+
+    location / {
+        proxy_pass http://about_backend;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+
+        proxy_hide_header Server;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header Strict-Transport-Security;
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header Referrer-Policy;
+        proxy_hide_header X-Permitted-Cross-Domain-Policies;
+
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+    }
+
+    location ~ /\. {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+}

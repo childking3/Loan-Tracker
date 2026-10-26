@@ -33,7 +33,15 @@ class m260910_200000_init_rbac extends Migration
         'viewAccessLogs',
     ];
 
-    private const SEEDED_ADMIN_USER_ID = 1;
+    /**
+     * Looked up by username: auto_increment is not guaranteed to hand the
+     * seeded admin id 1 (on a Galera cluster with auto_increment_increment=2
+     * it can be 2), and a hard-coded id would leave the admin role-less.
+     */
+    private function seededAdminUserId(): int
+    {
+        return (int) (new \yii\db\Query())->select('id')->from('{{%user}}')->where(['username' => 'admin'])->scalar();
+    }
 
     public function safeUp()
     {
@@ -73,14 +81,14 @@ class m260910_200000_init_rbac extends Migration
         $auth->addChild($admin, $permissions['manageSettings']);
         $auth->addChild($admin, $permissions['viewAccessLogs']);
 
-        $auth->assign($admin, self::SEEDED_ADMIN_USER_ID);
+        $auth->assign($admin, $this->seededAdminUserId());
     }
 
     public function safeDown()
     {
         $auth = Yii::$app->authManager;
 
-        $auth->revokeAll(self::SEEDED_ADMIN_USER_ID);
+        $auth->revokeAll($this->seededAdminUserId());
 
         foreach (['admin', 'manager', 'staff'] as $roleName) {
             if ($role = $auth->getRole($roleName)) {

@@ -121,10 +121,21 @@ class SiteController extends Controller
         if (Yii::$app->request->isPost) {
             $model->avatarFile = UploadedFile::getInstanceByName('User[avatarFile]');
             if ($model->avatarFile !== null && $model->validate(['avatarFile'])) {
-                $model->saveAvatar($model->avatarFile);
-                AuditLogger::audit('user_avatar_update', 'user', $model->id, null, ['avatar_filename' => $model->avatar_filename]);
-                Yii::$app->session->setFlash('success', 'Profile picture updated.');
-                return $this->redirect(['site/profile']);
+                // Throwable, not a narrower type: FileValidator already checked
+                // extension/mime, but AvatarStorage::save() still throws
+                // RuntimeException if getimagesize() itself rejects the body
+                // (a file that only LOOKS like an image passes the earlier
+                // check) - an uploaded-file edge case any logged-in user can
+                // trigger on themselves, confirmed as a raw 500 before this fix.
+                try {
+                    $model->saveAvatar($model->avatarFile);
+                    AuditLogger::audit('user_avatar_update', 'user', $model->id, null, ['avatar_filename' => $model->avatar_filename]);
+                    Yii::$app->session->setFlash('success', 'Profile picture updated.');
+                    return $this->redirect(['site/profile']);
+                } catch (\Throwable $e) {
+                    Yii::error('Avatar not stored: ' . (string) $e, __METHOD__);
+                    Yii::$app->session->setFlash('error', 'That picture could not be used - try a different file.');
+                }
             }
 
             Yii::$app->session->setFlash('error', implode(' ', $model->getFirstErrors()) ?: 'Choose a picture to upload.');

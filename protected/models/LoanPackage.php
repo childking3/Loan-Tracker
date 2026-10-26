@@ -6,14 +6,15 @@ use yii\behaviors\TimestampBehavior;
 use yii\db\ActiveRecord;
 
 /**
- * ActiveRecord for the loan_package table: five fixed loan packages per
- * the client brief. Read-only from the loan module (LoanController reads
- * terms via applyPackageTerms(); editing is LoanPackageController's job).
+ * ActiveRecord for the loan_package table: the business's loan packages,
+ * editable in number (create/delete) as well as in terms. Read-only from
+ * the loan module (LoanController reads terms via applyPackageTerms();
+ * editing is LoanPackageController's job).
  *
- * No create or delete action exists by design - is_active retires a
- * package without breaking loans that reference it via loan.package_id
- * (RESTRICT), the same pattern as Customer's soft-delete and User's
- * deactivation.
+ * Deleting a package a loan references fails on loan.package_id's own
+ * RESTRICT foreign key - LoanPackageController checks for that first and
+ * points the user at is_active instead, the same retire-without-breaking-
+ * history pattern as Customer's soft-delete and User's deactivation.
  */
 class LoanPackage extends ActiveRecord
 {
@@ -52,7 +53,7 @@ class LoanPackage extends ActiveRecord
             'loan_amount' => 'Loan amount',
             'total_repayment' => 'Total repayment',
             'daily_payment' => 'Daily payment',
-            'repayment_period_days' => 'Repayment period (days)',
+            'repayment_period_days' => 'Repayment period (working days)',
             'is_active' => 'Active',
         ];
     }
@@ -66,5 +67,28 @@ class LoanPackage extends ActiveRecord
             ->andWhere(['is_active' => true])
             ->orderBy(['loan_amount' => SORT_ASC])
             ->all();
+    }
+
+    /**
+     * id => label options for a package <select>, active packages only.
+     * Shared by LoanController's and CustomerController's loan-create
+     * forms - was a private copy in each until this consolidation.
+     *
+     * @return array<int, string>
+     */
+    public static function selectOptions(): array
+    {
+        $options = [];
+        foreach (static::activePackages() as $package) {
+            $options[$package->id] = sprintf(
+                '%s (Amount: %s, Repay: %s over %d working days)',
+                $package->name,
+                $package->loan_amount,
+                $package->total_repayment,
+                $package->repayment_period_days
+            );
+        }
+
+        return $options;
     }
 }

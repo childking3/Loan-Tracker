@@ -10,15 +10,15 @@ $this->title = 'Import Customers';
 <h1>Import Customers</h1>
 <p class="muted">Upload a CSV file with columns <code>full_name, phone, address</code> to bulk-register customers.</p>
 
-<div class="record-card" style="align-items: flex-start; flex-direction: column; padding: 2rem; max-width: 480px; margin-bottom: 1.5rem;">
-    <span class="quick-action-icon" style="margin-bottom: 1rem;">
+<div class="record-card import-card">
+    <span class="quick-action-icon">
         <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
     </span>
-    <?= Html::beginForm(['import/customers'], 'post', ['enctype' => 'multipart/form-data', 'style' => 'width:100%;']) ?>
-        <label style="width:100%;">Choose CSV file
+    <?= Html::beginForm(['import/customers'], 'post', ['enctype' => 'multipart/form-data']) ?>
+        <label>Choose CSV file
             <input type="file" name="csvFile" accept=".csv" required>
         </label>
-        <?= Html::submitButton('Upload & Import', ['style' => 'margin-top: 0.5rem;']) ?>
+        <?= Html::submitButton('Upload & Import') ?>
     <?= Html::endForm() ?>
 </div>
 

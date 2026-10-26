@@ -8,7 +8,6 @@ $config = [
     'controllerNamespace' => 'app\commands',
     'aliases' => [
         '@app' => dirname(__DIR__),
-        '@runtime' => dirname(__DIR__) . '/runtime',
     ],
     'params' => require __DIR__ . '/params.php',
 ];
